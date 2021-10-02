@@ -22,27 +22,17 @@ from datetime import datetime
 from dateutil.rrule import rrule, DAILY,SECONDLY
 
 
-def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='', signal = '', hyperbolic = False, path='', signal_shape=100):
+def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='', signal = '', hyperbolic = False, path='', signal_shape=100, params=''):
     # df = pd.read_csv(read_path)
     # path = './data'
-    fitbit=False
-    if fitbit:
-          user_id=2022484408
-          df = df[df['Id'] == user_id][df.columns[-2:]]
-          df[df.columns[-2]] = pd.to_datetime(df[df.columns[-2]])
-          df.columns = ['timestamp', 'value']
-          df['timestamp'] = list(map(lambda x: datetime.timestamp(x), df['timestamp']))
-          percentage=round(len(df)/100*40) 
-          df = df.head(percentage)  
 
-    # plot(df, known_anomalies,signal)
     recons_signal=[]
     true_signal=[]
     critic_score = list()
     hyper_recons = []
     hyper_recons_z = []
     hyper_real = []
-    eucl_signal = []
+    eucl_recons = []
     path+='/'
     decoder = decoder.eval()
     encoder = encoder.eval()
@@ -52,20 +42,16 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
       if sample.shape[0] != 1:
         if encoder.hyperbolic:
           x, hyper_z = encoder(sample.float().cuda())
-          # hyper_x = encoder.hyperbolic_linear(sample.view(-1,100).float().cuda())
           hyper_recons_z.append(torch.squeeze(hyper_z).cpu().detach().numpy())
-          # hyper_real_z.append(torch.squeeze(hyper_x).cpu().detach().numpy())
         else: x = encoder(sample.float().cuda())
         
         if decoder.hyperbolic:
-          reconstructed_signal, eucl = decoder(x)
+          hyper, eucl = decoder(x)
           hyper_x = decoder.hyperbolic_linear(sample.view(-1,signal_shape).float().cuda())
-          # hyper_x_dist = decoder.dist(hyper_x)
-          # hyper_x = decoder.lin2(decoder.relu(decoder.lin1(hyper_x_dist)))
-          hyper_recons.append(torch.squeeze(reconstructed_signal).cpu().detach().numpy())
-          eucl_signal.append(torch.squeeze(eucl).cpu().detach().numpy())
+
+          recons_signal.append(torch.squeeze(hyper).cpu().detach().numpy())
+          eucl_recons.append(torch.squeeze(eucl).cpu().detach().numpy())
           hyper_real.append(torch.squeeze(hyper_x).cpu().detach().numpy())
-          recons_signal.append(torch.squeeze(eucl).cpu().detach().numpy())
 
         else: 
           reconstructed_signal = decoder(x)
@@ -75,23 +61,23 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
         critic_score.extend(torch.squeeze(critic_x(sample.cuda())).cpu().detach().numpy())
     
     if len(recons_signal[-1].shape) == 1:
-      recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
-      critic_score = np.append(np.concatenate(critic_score[:-1]),critic_score[-1].reshape(1,-1),axis=0)
       if decoder.hyperbolic:
-        eucl_signal = np.append(np.concatenate(eucl_signal[:-1]),eucl_signal[-1].reshape(1,-1),axis=0)
-        hyper_recons = np.append(np.concatenate(hyper_recons[:-1]),hyper_recons[-1].reshape(1,-1),axis=0)
+        eucl_recons = np.append(np.concatenate(eucl_recons[:-1]),eucl_recons[-1].reshape(1,-1),axis=0)
+        recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
         hyper_real = np.append(np.concatenate(hyper_real[:-1]),hyper_real[-1].reshape(1,-1),axis=0)
+      else:
+        recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
+        critic_score = np.append(np.concatenate(critic_score[:-1]),critic_score[-1].reshape(1,-1),axis=0)
       if encoder.hyperbolic:
         hyper_recons_z = np.append(np.concatenate(hyper_recons_z[:-1]),hyper_recons_z[-1].reshape(1,-1),axis=0)
 
     else:
-      recons_signal = np.concatenate(recons_signal[:-1])
+      recons_signal = np.concatenate(recons_signal)
       true_signal = np.concatenate(true_signal)
-      torch.save(recons_signal, path+'recons_hyper.pt')
-      torch.save(true_signal, path+'real_hyper.pt')
+      torch.save(recons_signal, path+'recons_signal.pt')
+      torch.save(true_signal, path+'gt_signal.pt')
 
       if decoder.hyperbolic:
-        recons_signal = np.concatenate(hyper_recons)
         true_signal = np.concatenate(hyper_real)
         torch.save(critic_score, 'critic_score.pt')
         torch.save(recons_signal, path+'recons_hyper.pt')
@@ -100,88 +86,158 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
         hyper_recons_z = np.concatenate(hyper_recons_z)
         torch.save(hyper_recons, path+'hyper_recons_z.pt')
 
+    if params.dataset == 'new_CASAS':
+        #just creating some random datetime index for the plots
+        random_index = list(rrule(SECONDLY, dtstart=datetime(2012, 11, 24), until=datetime(2012,11,30)))[:recons_signal.shape[0]]
+        x_index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
+        index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
+        torch.save(x_index, path+'x_index.pt')
 
-    random_index = list(rrule(SECONDLY, dtstart=datetime(2012, 11, 24), until=datetime(2012,11,30)))[:recons_signal.shape[0]]
-    x_index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
-    index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
-    torch.save(x_index, path+'x_index.pt')
+        y=y[0]
+        y=torch.load('./data/CASAS/new_dataset/{}/y_test'.format(params.signal))
+        y = y.reshape(y.shape[0]*y.shape[1], -1)[:x_index.shape[0]]
 
-    # index = index[0] #[(index[0].shape[0]-y_index[0].shape[0]):]
-    y=y[0]
-    # y_index = y_index[0]
-    # y_hat = unroll_ts(recons_signal)
-    # # y = unroll_ts(hyper_real)
-    # y = unroll_ts(true_signal)
-    # torch.save(y_hat, path+'y.pt')
-    # # plot the time series
-    # plot_ts([y, y_hat], labels=['original', 'reconstructed'],num='1')
-    # plot_ts([y_hat, y_hat], labels=['original', 'reconstructed'],num='2')
+        if not params.hyperbolic:
+          error, true_index, true, pred = score_anomalies(true_signal[:recons_signal.shape[0]].reshape(-1,params.signal_shape,1), 
+                                                          recons_signal.reshape(-1,params.signal_shape,1), 
+                                                          critic_score[:recons_signal.shape[0]], 
+                                                          x_index, 
+                                                          rec_error_type="point", 
+                                                          comb="mult")
+          torch.save(true_index, path+'true_index.pt')
+          torch.save(error, path+'error.pt')
+          intervals = find_anomalies(error[:recons_signal.shape[0]].reshape(-1), true_index, 
+                                window_size_portion=0.2, 
+                                window_size=1410,
+                                window_step_size_portion=None, 
+                                fixed_threshold=True,
+                                anomaly_padding=200)
+        else:
+          true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
+          pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
+          sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
+          squnorm = torch.sum(pred_data ** 2, dim=-1)
+          sqvnorm = torch.sum(true_data ** 2, dim=-1)
+          x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
+          dist = torch.acosh(x_temp)
+          
+          #using poincarè distances btw gt and preds as my errors
+          intervals = find_anomalies(dist, x_index, 
+                                window_size_portion=0.2, 
+                                window_size=1410,
+                                window_step_size_portion=None, 
+                                fixed_threshold=True,
+                                anomaly_padding=200)
 
-    # # x_index = x_index[0]
-    # # torch.save(x_index, path+'x_index.pt')
+        pred_anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
+        print(pred_anomalies[['start','end']])
+        pred_anomalies.to_csv(path+'pred_anomalies.csv')
+        known_anomalies = casas_anomalies(y,x_index)
+        anomalies = [pred_anomalies , known_anomalies]
+        colors = ['red'] + ['green'] * (len(anomalies) - 1)
+        plt.rcParams["figure.figsize"] = (50,10)
+        fig = plt.figure()
 
-    # # pair-wise error calculation
-    # error = np.zeros(shape=y.shape)
-    # length = y.shape[0]
-    # for i in range(length):
-    #     error[i] = abs(y_hat[i] - y[i])
+        for i, anomaly in enumerate(anomalies):
+          anomaly = list(anomaly[['start', 'end']].itertuples(index=False))
 
-    # # visualize the error curve
-    # fig = plt.figure(figsize=(30, 3))
-    # plt.plot(error)
-    # fig.savefig(path+'error.jpg')
-    # plt.show()
+          for _, anom in enumerate(anomaly):
+              t1 = convert_date_single(anom[0])
+              t2 = convert_date_single(anom[1])
+              plt.axvspan(t1, t2, color=colors[i], alpha=0.2)
+              plt.plot(list(map(lambda x: convert_date_single(x), x_index[:len(y)] )), y)
+        # plt.show()
+        fig.savefig(path+'anomalies.png', dpi=fig.dpi)
+        print('The plot with the anomalies is visible at {}'.format(path))
 
-    error, true_index, true, pred = score_anomalies(true_signal[:recons_signal.shape[0]].reshape(-1,150,1), recons_signal.reshape(-1,150,1), critic_score[:recons_signal.shape[0]], x_index, rec_error_type="point", comb="mult")
+        tn, fp, fn, tp = contextual_confusion_matrix(known_anomalies, pred_anomalies, weighted=False )
+        precision = tp/(tp+fp)
+        recall = tp/(tp+fn)
+        print('precision: {}, recall: {}'.format(precision, recall))
 
-    # error, true_index, true, pred = score_anomalies(true_signal.reshape(-1,100,1), recons_signal, critic_score, x_index, rec_error_type="point", comb="mult")
+        F1 = 2 * (precision * recall) / (precision + recall)
+        gmean = np.sqrt(precision*recall)
+        print('f1_score: {}, gmean: {}'.format(F1,gmean))
 
-    # errors, preds = reconstruction_errors(y.reshape(-1,1),y_hat.reshape(-1,1),rec_error_type="dtw")
-    # # visualize the error curve
-    # plot_error([[true, pred], error])
-    # find anomalies
 
-    # errors = stats.zscore(errors) 
-    # errors = np.clip(errors, a_min=0, a_max=None) + 1
-    # errors *= critic_score
-    torch.save(true_index, path+'true_index.pt')
-    torch.save(error, path+'error.pt')
-    intervals = find_anomalies(error[:recons_signal.shape[0]].reshape(-1), true_index, 
-                          window_size_portion=0.2, 
-                          window_size=1410,
-                          window_step_size_portion=None, 
-                          fixed_threshold=True,
-                          anomaly_padding=200)
+    else:
+        # index = index[0] #[(index[0].shape[0]-y_index[0].shape[0]):]
+        y=y[0]
+        # y_index = y_index[0]
+        # y_hat = unroll_ts(recons_signal)
+        # # y = unroll_ts(hyper_real)
+        # y = unroll_ts(true_signal)
+        # torch.save(y_hat, path+'y.pt')
+        # # plot the time series
+        # plot_ts([y, y_hat], labels=['original', 'reconstructed'],num='1')
+        # plot_ts([y_hat, y_hat], labels=['original', 'reconstructed'],num='2')
 
-    # intervals = find_anomalies(error.reshape(-1), index.numpy(), 
-    #                           window_size_portion=0.33, 
-    #                           window_step_size_portion=0.1, 
-    #                           fixed_threshold=True)
-    # visualize the result
-    print(intervals)
-    anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
-    print(anomalies[['start','end']])
-    anomalies.to_csv(path+'anomalies.csv')
-    # plot(df, [anomalies], signal, path)  
-    
-    try:
-      anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
-      print(anomalies[['start','end']])
-      plot(df, [anomalies], signal, path)  
-      print(known_anomalies)
-      print(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
+        # # x_index = x_index[0]
+        # # torch.save(x_index, path+'x_index.pt')
 
-      res = pd.read_csv('results.csv', index_col=0)
-      res.loc[len(res)] = contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False)
-      # res.to_csv('results.csv')
-      # find_scores(y_true, y_predict)
-      plot(df, [anomalies, known_anomalies], signal, path)        
-    except:
-      res = pd.read_csv('results.csv', index_col=0)
-      res.loc[len(res)] = (0,0,0,0)
+        # # pair-wise error calculation
+        # error = np.zeros(shape=y.shape)
+        # length = y.shape[0]
+        # for i in range(length):
+        #     error[i] = abs(y_hat[i] - y[i])
 
-      plot(df, [known_anomalies], signal, path)   
-      # res.to_csv('results.csv')
+        # # visualize the error curve
+        # fig = plt.figure(figsize=(30, 3))
+        # plt.plot(error)
+        # fig.savefig(path+'error.jpg')
+        # plt.show()
+
+        error, true_index, true, pred = score_anomalies(true_signal[:recons_signal.shape[0]].reshape(-1,150,1), recons_signal.reshape(-1,150,1), critic_score[:recons_signal.shape[0]], x_index, rec_error_type="point", comb="mult")
+
+        # error, true_index, true, pred = score_anomalies(true_signal.reshape(-1,100,1), recons_signal, critic_score, x_index, rec_error_type="point", comb="mult")
+
+        # errors, preds = reconstruction_errors(y.reshape(-1,1),y_hat.reshape(-1,1),rec_error_type="dtw")
+        # # visualize the error curve
+        # plot_error([[true, pred], error])
+        # find anomalies
+
+        # errors = stats.zscore(errors) 
+        # errors = np.clip(errors, a_min=0, a_max=None) + 1
+        # errors *= critic_score
+        torch.save(true_index, path+'true_index.pt')
+        torch.save(error, path+'error.pt')
+        intervals = find_anomalies(error[:recons_signal.shape[0]].reshape(-1), true_index, 
+                              window_size_portion=0.2, 
+                              window_size=1410,
+                              window_step_size_portion=None, 
+                              fixed_threshold=True,
+                              anomaly_padding=200)
+
+        # intervals = find_anomalies(error.reshape(-1), index.numpy(), 
+        #                           window_size_portion=0.33, 
+        #                           window_step_size_portion=0.1, 
+        #                           fixed_threshold=True)
+        
+        # visualize the result
+        print(intervals)
+        anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
+        print(anomalies[['start','end']])
+        anomalies.to_csv(path+'anomalies.csv')
+        # plot(df, [anomalies], signal, path)  
+        
+        try:
+          anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
+          print(anomalies[['start','end']])
+          plot(df, [anomalies], signal, path)  
+          print(known_anomalies)
+          print(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
+
+          res = pd.read_csv('results.csv', index_col=0)
+          res.loc[len(res)] = contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False)
+          # res.to_csv('results.csv')
+          # find_scores(y_true, y_predict)
+          plot(df, [anomalies, known_anomalies], signal, path)        
+        except:
+          res = pd.read_csv('results.csv', index_col=0)
+          res.loc[len(res)] = (0,0,0,0)
+
+          plot(df, [known_anomalies], signal, path)   
+          # res.to_csv('results.csv')
 
 def test_lstm(test_loader, model, known_anomalies, path, signal = ''):
     df = pd.read_csv(path)
@@ -237,6 +293,31 @@ def test_lstm(test_loader, model, known_anomalies, path, signal = ''):
     print(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
     # find_scores(y_true, y_predict)
     plot(df, [anomalies, known_anomalies], signal)        
+
+
+def casas_anomalies(y,x_index):
+    # just loading casas anomalies in the correct format
+    gt_anomal = []
+    actual = None
+    print(y.shape)
+    y = y.reshape(y.shape[0]*y.shape[1], -1)[:x_index.shape[0]]
+    for i in range(len(y.reshape(-1)==1)):
+      if y[i]==1:
+        if actual == None:
+          actual = i
+          start = x_index[i]
+        else:
+          actual = i
+      else:
+        if actual != None:
+          gt_anomal.append((start, x_index[actual-1]))
+          actual = None
+
+    gt_anomal = pd.DataFrame.from_records(gt_anomal, columns =['start', 'end'])
+    return gt_anomal
+
+def convert_date_single(x):
+    return datetime.fromtimestamp(x)
 
 def _overlap(expected, observed):
     first = expected[0] - observed[1]
@@ -1281,14 +1362,6 @@ if __name__ == "__main__":
         test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=1800)
         demo=True
         path = './data/{}.csv'
-      elif params.signal in signal_list:
-        # train_data = od.load_signal('nyc_taxi')
-        # test_data = od.load_signal('nyc_taxi')
-
-        train_dataset = SignalDataset(path='./data/Fitabase Data 4.12.16-5.12.16/{}.csv'.format(params.signal),interval=params.interval,fitbit=True,user_id=params.user_id)
-        test_dataset = SignalDataset(path='./data/Fitabase Data 4.12.16-5.12.16/{}.csv'.format(params.signal),test=True,interval=params.interval,fitbit=True,user_id=params.user_id)
-        demo=True
-        path = './data/Fitabase Data 4.12.16-5.12.16/{}.csv'
 
       else:
         train_data = od.load_signal(params.signal +'-train')
@@ -1343,6 +1416,6 @@ if __name__ == "__main__":
       else: known_anomalies=[]
 
       if demo:
-        test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=path.format(params.signal), signal = params.signal, hyperbolic = params.hyperbolic, path=PATH)
+        test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=path.format(params.signal), signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, params=params)
       else:
-        test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='./data/{}-test.csv'.format(params.signal),signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape)
+        test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='./data/{}-test.csv'.format(params.signal),signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)

@@ -16,7 +16,6 @@ from torch.utils.data import Dataset, DataLoader
 
 import model_LSTM
 import anomaly_detection_lstm
-import anomaly_detection_CASAS
 
 from utils import parse_args
 import data as od
@@ -35,8 +34,6 @@ logging.basicConfig(filename='train.log', level=logging.DEBUG)
 def critic_x_iteration(sample):
     optim_cx.zero_grad()
     x = sample.view(sequence_shape, batch_size, signal_shape)
-    # x = decoder.hyperbolic_linear(x.view(-1,100))
-    # x = gmath.logmap0(x, k=torch.tensor(-1.), dim=1).float()
     valid_x = critic_x(x)
     valid_x = torch.squeeze(valid_x)
     critic_score_valid_x = torch.mean(torch.ones(valid_x.shape).cuda() * valid_x) #Wasserstein Loss
@@ -44,6 +41,7 @@ def critic_x_iteration(sample):
     #The sampled z are the anomalous points - points deviating from actual distribution of z (obtained through encoding x)
     z = torch.empty(1, batch_size, latent_space_dim).uniform_(0, 1)
     if decoder.hyperbolic:
+      #hyperspace not used with the critics at the moment
       x_,eucl = decoder(z.cuda())
       # x_ = gmath.logmap0(x_, k=torch.tensor(-1.), dim=1).float()
     else: x_ = decoder(z.cuda())
@@ -105,8 +103,6 @@ def encoder_iteration(sample):
     optim_enc.zero_grad()
 
     x = sample.view(sequence_shape, batch_size, signal_shape)
-    # x = decoder.hyperbolic_linear(x.view(-1,100))
-    # x = gmath.logmap0(x, k=torch.tensor(-1.), dim=1).float()
     valid_x = critic_x(x)
     valid_x = torch.squeeze(valid_x)
     critic_score_valid_x = torch.mean(torch.ones(valid_x.shape).cuda() * valid_x) #Wasserstein Loss
@@ -128,44 +124,20 @@ def encoder_iteration(sample):
     if decoder.hyperbolic:
       gen_x,eucl = decoder(enc_z)
       hyper_x = decoder.hyperbolic_linear(x.view(-1,signal_shape))
-      # hyper_x = decoder.dist(hyper_x)
-      # hyper_x = decoder.lin2(decoder.relu(decoder.lin1(hyper_x)))
-      # mse_loss = err_loss(hyper_x, gen_x)
 
+      #poincarè distance
       sqdist = torch.sum((gen_x - hyper_x) ** 2, dim=-1)
       squnorm = torch.sum(gen_x ** 2, dim=-1)
       sqvnorm = torch.sum(hyper_x ** 2, dim=-1)
       x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
-      # z = torch.sqrt(x_temp ** 2 - 1)
-      # dist = torch.log(x_temp + z)
       dist = torch.acosh(x_temp)
 
-      mse_loss = torch.div(torch.sum(dist),batch_size)
-
-      # gen_x_eucl = gmath.logmap0(gen_x, k=torch.tensor(-1.), dim=1).float()
+      hyper_loss = torch.div(torch.sum(dist),batch_size)
       mse = err_loss(eucl.float(), x.float())
-      alpha = 1
-      loss_enc = mse + (alpha)*mse_loss + critic_score_valid_x - critic_score_fake_x
-
-      # print(mse_loss)   
-      # target, sizes_mask = compute_mask((1,1,1), batch_size)
-
-      # score = compute_scores(gen_x, hyper_x, (1,1,1), batch_size)
-
-      # _, B2, NS, NP, SQ = sizes_mask
-      # # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
-      # # similarity matrix is computed inside each gpu, thus here B == num_gpu * B2
-      # score_flattened = score.contiguous().view(batch_size * NP * SQ, B2 * NS * SQ)
-
-      # target_flattened = target.contiguous().view(batch_size * NP * SQ, B2 * NS * SQ)
-      # target_flattened = target_flattened.float().argmax(dim=1)
-
-      # loss = nn.functional.cross_entropy(score_flattened, target_flattened)
-      # mse_loss = loss
+      loss_enc = mse + hyper_loss + critic_score_valid_x - critic_score_fake_x
 
     else: 
       gen_x = decoder(enc_z)
-      # print('x: {}, encoding: {}, generated_x: {}'.format(x.shape, enc_z.shape, gen_x.shape))
       mse = err_loss(x.float(), gen_x.float())
       loss_enc = mse + critic_score_valid_x - critic_score_fake_x
 
@@ -175,15 +147,12 @@ def encoder_iteration(sample):
     return loss_enc
 
 
-# def poincare_loss(output, target):
-#     loss = torch.mean((output - target)**2)
-#     return loss
-
 def decoder_iteration(sample):
     optim_dec.zero_grad()
 
     x = sample.view(sequence_shape, batch_size, signal_shape)
     if encoder.hyperbolic:
+      #not used
       z, _ = encoder(x)
       # mse_loss = err_loss(x.float(), gen_x.float())
     else: z = encoder(x)
@@ -197,55 +166,25 @@ def decoder_iteration(sample):
     critic_score_fake_z = torch.mean(torch.ones(fake_z.shape).cuda() * fake_z)
 
     if encoder.hyperbolic:
-      enc_z, _ = encoder(x)
-      # mse_loss = err_loss(x.float(), gen_x.float())
+        #not used at the moment
+        enc_z, _ = encoder(x)
+        # mse_loss = err_loss(x.float(), gen_x.float())
     else: enc_z = encoder(x)
+
     if decoder.hyperbolic:
       gen_x,eucl = decoder(enc_z)
       hyper_x = decoder.hyperbolic_linear(x.view(-1,signal_shape))
-      mse=0
-
-      # target, sizes_mask = compute_mask((1,1,1), batch_size)
-
-      # score = compute_scores(gen_x, hyper_x, (1,1,1), batch_size)
-
-
-      # _, B2, NS, NP, SQ = sizes_mask
-      # # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
-      # # similarity matrix is computed inside each gpu, thus here B == num_gpu * B2
-      # score_flattened = score.contiguous().view(batch_size * NP * SQ, B2 * NS * SQ)
-
-      # target_flattened = target.contiguous().view(batch_size * NP * SQ, B2 * NS * SQ)
-      # target_flattened = target_flattened.float().argmax(dim=1)
-
-      # loss = nn.functional.cross_entropy(score_flattened, target_flattened)
-      # # print(loss)
-      # # top1, top3, top5 = calc_topk_accuracy(score_flattened, target_flattened, (1, 3, 5))
-
-      # # results = top1, top3, top5, loss.item(), batch_size
-      # mse_loss = loss
-
-      # hyper_x = decoder.dist(hyper_x)
-      # hyper_x = decoder.lin2(decoder.relu(decoder.lin1(hyper_x)))
-      # mse_loss = err_loss(hyper_x, gen_x)
-
 
       sqdist = torch.sum((gen_x - hyper_x) ** 2, dim=-1)
       squnorm = torch.sum(gen_x ** 2, dim=-1)
       sqvnorm = torch.sum(hyper_x ** 2, dim=-1)
       x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
-      # z = torch.sqrt(x_temp ** 2 - 1)
-      # dist = torch.log(x_temp + z)
       dist = torch.acosh(x_temp)
-      # print(dist)
 
       hyper_loss = torch.div(torch.sum(dist),batch_size)
 
-      # gen_x_eucl = gmath.logmap0(gen_x, k=torch.tensor(-1.), dim=1).float()
-      # print(gen_x_eucl.shape,x.shape)
       mse = err_loss(eucl.float(), x.float())
-      alpha = 1
-      loss_dec = mse + (alpha)*hyper_loss + critic_score_valid_z - critic_score_fake_z
+      loss_dec = mse + hyper_loss + critic_score_valid_z - critic_score_fake_z
      
       loss_dec.backward(retain_graph=True)
       optim_dec.step()
@@ -286,8 +225,6 @@ def train_tadgan(encoder, decoder, critic_x, critic_z, n_epochs=2000, params=Non
             cz_loss = list()
 
             for batch, sample in enumerate(train_loader):
-                # sample = torch.Tensor(sample.numpy().repeat(10,2))
-
                 loss = critic_x_iteration(sample.cuda())
                 cx_loss.append(loss)
 
@@ -320,6 +257,7 @@ def train_tadgan(encoder, decoder, critic_x, critic_z, n_epochs=2000, params=Non
         eucl_dec_loss.append(torch.mean(torch.tensor(mse_losss)))
         logging.debug('Encoder decoder training done in epoch {}'.format(epoch))
         logging.debug('critic x loss {:.3f} critic z loss {:.3f} \nencoder loss {:.3f} decoder loss {:.3f}\n'.format(cx_epoch_loss[-1], cz_epoch_loss[-1], encoder_epoch_loss[-1], decoder_epoch_loss[-1]))
+        
         print('Encoder decoder training done in epoch {}'.format(epoch))
         if params.hyperbolic: print('Hyperbolic loss {}'.format(hyp_dec_loss[-1]))
         print('Eucl mse loss {}'.format(eucl_dec_loss[-1]))
@@ -374,9 +312,12 @@ def train_lstm(model,optimizer,train_loader,test_loader,n_epochs=2000):
 if __name__ == "__main__":
     params = parse_args()
     print('signal: {}'.format(params.signal))
-    signal_list = ['heartrate_seconds_merged','minuteStepsNarrow_merged','hourlyCalories_merged','minuteSleep_merged']
-    demo=False
+
+    # dataset selection
+    demo=False # demo is the taxy dataset present in the tadgan example. it has same data for train and test
+
     if params.dataset == 'CASAS':
+        #this is a dataset used with the Team, not used at the moment
         path = '/content/drive/MyDrive/ASSISTED LIVING (e-linus)/Data&Experiments/DianeCookCASAS/'
         train_dataset = CasasDataset(seq_path=path+'sequences_2week_{}.pt'.format(params.signal), 
                                      gt_path=path+'ground_truth_2week_{}.pt'.format(params.signal), split=params.split)
@@ -388,7 +329,6 @@ if __name__ == "__main__":
                                      gt_path=path+params.signal, split=params.split, dataset=params.dataset)
         test_dataset = CasasDataset(seq_path=path+params.signal, 
                                      gt_path=path+params.signal, test=True, dataset=params.dataset)
-
     else:
         if params.signal == 'nyc_taxi':
           train_data = od.load_signal('nyc_taxi')
@@ -398,15 +338,6 @@ if __name__ == "__main__":
           test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=1800)
           demo=True
           path = './data/{}.csv'
-        elif params.signal in signal_list:
-          # train_data = od.load_signal('nyc_taxi')
-          # test_data = od.load_signal('nyc_taxi')
-
-          train_dataset = SignalDataset(path='./data/Fitabase Data 4.12.16-5.12.16/{}.csv'.format(params.signal),interval=params.interval,fitbit=True,user_id=params.user_id)
-          test_dataset = SignalDataset(path='./data/Fitabase Data 4.12.16-5.12.16/{}.csv'.format(params.signal),test=True,interval=params.interval,fitbit=True,user_id=params.user_id)
-          demo=True
-          path = './data/Fitabase Data 4.12.16-5.12.16/{}.csv'
-
         else:
           train_data = od.load_signal(params.signal +'-train')
           test_data = od.load_signal(params.signal +'-test')
@@ -428,6 +359,8 @@ if __name__ == "__main__":
     latent_space_dim = 20
 
     if params.model == 'lstm':
+      #LSTM not used at the moment
+
       model = model_LSTM.RecurrentAutoencoder(batch_size=64, seq_len=100,n_features=signal_shape, embedding_dim=latent_space_dim)
       model = model.cuda()
 
@@ -446,9 +379,10 @@ if __name__ == "__main__":
       decoder_path = 'models/decoder.pt'
       critic_x_path = 'models/critic_x.pt'
       critic_z_path = 'models/critic_z.pt'
+
       signal_shape = params.signal_shape
-      # signal_shape = 150
       sequence_shape = 1
+
       encoder = model.Encoder(encoder_path, signal_shape, latent_space_dim, params.hyperbolic, sequence_shape=sequence_shape).cuda().train()
       decoder = model.Decoder(decoder_path, signal_shape, latent_space_dim, params.hyperbolic).cuda().train()
       critic_x = model.CriticX(critic_x_path, signal_shape, latent_space_dim,sequence_shape=sequence_shape).cuda().train()
@@ -489,13 +423,10 @@ if __name__ == "__main__":
       else: known_anomalies=[]
 
       if demo:
-        anomaly_detection_lstm.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=path.format(params.signal), signal = params.signal, hyperbolic = params.hyperbolic, path=PATH)
+        anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=path.format(params.signal), signal = params.signal, hyperbolic = params.hyperbolic, path=PATH)
       else:
-        anomaly_detection_lstm.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='./data/{}-test.csv'.format(params.signal),signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape)
+        anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='./data/{}-test.csv'.format(params.signal),signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape)
       
-      # else:
-          # anomaly_detection_CASAS.test_tadgan_casas(test_loader, encoder, decoder, critic_x, critic_z, signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape)
-
 
     
 

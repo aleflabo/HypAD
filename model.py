@@ -78,15 +78,7 @@ class Decoder(nn.Module):
         x = self.dense2(x)
         if self.hyperbolic:
           hyper_gen_init = self.hyperbolic_linear(x.view(-1, self.signal_shape))
-          # hyper_gen_dist = self.dist(hyper_gen_init)
-          # eucl = gmath.logmap0(hyper_gen_init, k=torch.tensor(-1.), dim=1).float()
-          # # eucl = self.lin1(eucl)
-          # eucl = self.lin2(self.relu(self.lin1(eucl)))
           return (hyper_gen_init.view(1,-1,self.signal_shape),x)
-          
-          # return (eucl.view(1,-1,self.signal_shape),hyper_gen)
-
-          # return (hyper_gen.view(1,-1,self.signal_shape),hyper_gen)
 
         return (x)
 

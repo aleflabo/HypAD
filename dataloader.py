@@ -7,18 +7,9 @@ import torch
 from datetime import datetime
 
 class SignalDataset(Dataset):
-    def __init__(self, path, interval=21600, windows_size=100, test=False, fitbit=False, user_id=None):
+    def __init__(self, path, interval=21600, windows_size=100, test=False, user_id=None):
+        #same preprocessing as tadgan paper
         self.signal_df = pd.read_csv(path)
-        if fitbit:
-          self.signal_df=self.signal_df[self.signal_df.columns[:3]]
-          self.signal_df = self.signal_df[self.signal_df['Id'] == user_id][self.signal_df.columns[-2:]]
-          self.signal_df[self.signal_df.columns[-2]] = pd.to_datetime(self.signal_df[self.signal_df.columns[-2]])
-          self.signal_df.columns = ['timestamp', 'value']
-          self.signal_df['timestamp'] = list(map(lambda x: datetime.timestamp(x), self.signal_df['timestamp']))
-          percentage=round(len(self.signal_df)/100*40) 
-          self.signal_df = self.signal_df.head(percentage)  
-          # test=user.iloc[percentage:len(user),:]
-
         self.interval = interval
         self.windows_size = windows_size
         self.test = test
@@ -159,6 +150,5 @@ class SignalDataset(Dataset):
           return x, self.index, self.y, self.y_index, self.X_index
         return x
 
-        # return {'value':x, 'anomaly':row['anomaly']}
 
 

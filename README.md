@@ -21,11 +21,11 @@ python anomaly_detection.py --dataset 'original' --signal 'M-1' --model 'tadgan'
 ### **Training+detector** on multivariate signals 
 
 ```
-python main_official.py --dataset 'new_CASAS' --signal 'fall' --epochs=10 --model 'tadgan' --lr=0.0005 --signal_shape=150
+python main.py --dataset 'new_CASAS' --signal 'fall' --epochs=10 --model 'tadgan' --lr=0.0005 --signal_shape=150
 ```
 with hyperbolic:
 ```
-python main_official.py --dataset 'new_CASAS' --signal 'fall' --epochs=10 --model 'tadgan' --lr=0.0005 --signal_shape=150
+python main.py --dataset 'new_CASAS' --signal 'fall' --epochs=10 --model 'tadgan' --lr=0.0005 --signal_shape=150
 ```
 
 #### Once trained, you can run the only **Detector**

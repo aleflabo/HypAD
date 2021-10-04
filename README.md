@@ -15,7 +15,7 @@ The signals that are already present in the orion DB are here: https://sintel.de
 #### Once trained, you can run the only **Detector**
 add the flag --hyperbolic if you want to use the hyperspace train
 ```
-python anomaly_refactor.py --dataset 'original' --signal 'M-1' --model 'tadgan'
+python anomaly_detection.py --dataset 'original' --signal 'M-1' --model 'tadgan'
 ```
 
 ### **Training+detector** on multivariate signals 
@@ -31,6 +31,6 @@ python main_official.py --dataset 'new_CASAS' --signal 'fall' --epochs=10 --mode
 #### Once trained, you can run the only **Detector**
 add the flag --hyperbolic if you want to use the hyperspace train
 ```
-python anomaly_refactor.py --dataset 'new_CASAS' --signal 'fall' --model 'tadgan'
+python anomaly_detection.py --dataset 'new_CASAS' --signal 'fall' --model 'tadgan'
 ```
 list of signals: [fall, weakness, nocturia. moretimeinchair, slowerwalking]

@@ -416,16 +416,13 @@ if __name__ == "__main__":
       torch.save(critic_z, PATH+'/critic_z.pt')
 
       if params.dataset not in  ['CASAS','new_CASAS']  :
-        if params.signal in signal_list:
-          known_anomalies = pd.DataFrame()
-        else:
           known_anomalies = od.load_anomalies(params.signal)
       else: known_anomalies=[]
 
       if demo:
-        anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=path.format(params.signal), signal = params.signal, hyperbolic = params.hyperbolic, path=PATH)
+        anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=path.format(params.signal), signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, params=params)
       else:
-        anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='./data/{}-test.csv'.format(params.signal),signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape)
+        anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='./data/{}-test.csv'.format(params.signal),signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)
       
 
     

@@ -159,85 +159,49 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
         gmean = np.sqrt(precision*recall)
         print('f1_score: {}, gmean: {}'.format(F1,gmean))
 
-
     else:
-        # index = index[0] #[(index[0].shape[0]-y_index[0].shape[0]):]
-        y=y[0]
-        # y_index = y_index[0]
-        # y_hat = unroll_ts(recons_signal)
-        # # y = unroll_ts(hyper_real)
-        # y = unroll_ts(true_signal)
-        # torch.save(y_hat, path+'y.pt')
-        # # plot the time series
-        # plot_ts([y, y_hat], labels=['original', 'reconstructed'],num='1')
-        # plot_ts([y_hat, y_hat], labels=['original', 'reconstructed'],num='2')
+        df = pd.read_csv(read_path)
 
-        # # x_index = x_index[0]
-        # # torch.save(x_index, path+'x_index.pt')
+        x_index = x_index[0]
+        true_index = x_index
+        if not params.hyperbolic:
+          error, true_index, true, pred = score_anomalies(true_signal, 
+                                                          recons_signal, 
+                                                          critic_score, 
+                                                          x_index, 
+                                                          rec_error_type="dtw", 
+                                                          comb="mult")
+        else:
+          true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
+          pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
+          sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
+          squnorm = torch.sum(pred_data ** 2, dim=-1)
+          sqvnorm = torch.sum(true_data ** 2, dim=-1)
+          x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
+          error = torch.acosh(x_temp)
+          #using poincarè distances between gt and preds as errors
 
-        # # pair-wise error calculation
-        # error = np.zeros(shape=y.shape)
-        # length = y.shape[0]
-        # for i in range(length):
-        #     error[i] = abs(y_hat[i] - y[i])
-
-        # # visualize the error curve
-        # fig = plt.figure(figsize=(30, 3))
-        # plt.plot(error)
-        # fig.savefig(path+'error.jpg')
-        # plt.show()
-
-        error, true_index, true, pred = score_anomalies(true_signal[:recons_signal.shape[0]].reshape(-1,150,1), recons_signal.reshape(-1,150,1), critic_score[:recons_signal.shape[0]], x_index, rec_error_type="point", comb="mult")
-
-        # error, true_index, true, pred = score_anomalies(true_signal.reshape(-1,100,1), recons_signal, critic_score, x_index, rec_error_type="point", comb="mult")
-
-        # errors, preds = reconstruction_errors(y.reshape(-1,1),y_hat.reshape(-1,1),rec_error_type="dtw")
-        # # visualize the error curve
-        # plot_error([[true, pred], error])
-        # find anomalies
-
-        # errors = stats.zscore(errors) 
-        # errors = np.clip(errors, a_min=0, a_max=None) + 1
-        # errors *= critic_score
-        torch.save(true_index, path+'true_index.pt')
-        torch.save(error, path+'error.pt')
-        intervals = find_anomalies(error[:recons_signal.shape[0]].reshape(-1), true_index, 
-                              window_size_portion=0.2, 
-                              window_size=1410,
-                              window_step_size_portion=None, 
-                              fixed_threshold=True,
-                              anomaly_padding=200)
-
-        # intervals = find_anomalies(error.reshape(-1), index.numpy(), 
-        #                           window_size_portion=0.33, 
-        #                           window_step_size_portion=0.1, 
-        #                           fixed_threshold=True)
+        intervals = find_anomalies(error.reshape(-1), true_index, 
+                                  window_size_portion=0.33, 
+                                  window_step_size_portion=0.1, 
+                                  fixed_threshold=True)
         
         # visualize the result
-        print(intervals)
         anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
         print(anomalies[['start','end']])
         anomalies.to_csv(path+'anomalies.csv')
-        # plot(df, [anomalies], signal, path)  
         
         try:
           anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
-          print(anomalies[['start','end']])
           plot(df, [anomalies], signal, path)  
           print(known_anomalies)
           print(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
-
-          res = pd.read_csv('results.csv', index_col=0)
-          res.loc[len(res)] = contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False)
-          # res.to_csv('results.csv')
-          # find_scores(y_true, y_predict)
           plot(df, [anomalies, known_anomalies], signal, path)        
         except:
-          res = pd.read_csv('results.csv', index_col=0)
-          res.loc[len(res)] = (0,0,0,0)
-
           plot(df, [known_anomalies], signal, path)   
-          # res.to_csv('results.csv')
+
+
+
 
 def test_lstm(test_loader, model, known_anomalies, path, signal = ''):
     df = pd.read_csv(path)
@@ -674,16 +638,6 @@ def _area_error(y, y_hat, score_window=10):
 
     return errors
 
-# @jit(nopython=True) # Set "nopython" mode for best performance, equivalent to @njit
-def poincare_dist(true_data,pred_data): # Function is compiled to machine code when called the first time
-    true_data = torch.Tensor(true_data).reshape(-1,1)
-    pred_data = torch.Tensor(pred_data).reshape(-1,1)
-    sqdist = torch.sum((pred_data - true_data) ** 2, dim=-1)
-    squnorm = torch.sum(pred_data ** 2, dim=-1)
-    sqvnorm = torch.sum(true_data ** 2, dim=-1)
-    x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) #+ 1e-7
-    dist = torch.acosh(x_temp)
-    return dist.numpy()
 
 def _dtw_error(y, y_hat, score_window=10):
     """Compute dtw error between predicted and expected values.
@@ -721,8 +675,7 @@ def _dtw_error(y, y_hat, score_window=10):
 
         pred_data = y_hat_pad[i:i + length_dtw]
         pred_data = pred_data.flatten()
-        dist = poincare_dist(true_data,pred_data)
-        # dist = dtw(true_data, pred_data)
+        dist = dtw(true_data, pred_data)
         similarity_dtw.append(dist)
         i += 1
 

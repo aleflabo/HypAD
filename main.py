@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
 
 import model_LSTM
-import anomaly_detection_lstm
+import anomaly_detection
 
 from utils import parse_args
 import data as od

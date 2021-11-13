@@ -270,6 +270,7 @@ def train_tadgan(encoder, decoder, critic_x, critic_z, n_epochs=2000, params=Non
         hyp_loss = list()
         mse_losss = list()
         for batch, sample in enumerate(train_loader):
+            
             enc_loss = encoder_iteration(sample.cuda())
             dec_loss,hyper_loss,mse_loss = decoder_iteration(sample.cuda())
             encoder_loss.append(enc_loss)
@@ -374,8 +375,8 @@ if __name__ == "__main__":
 
         elif params.dataset in ['A1','A2','A3','A4']:
 
-            train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1)
-            test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1)
+            train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1,yahoo=True)
+            test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1,yahoo=True)
             read_path = './data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal)
             
 

@@ -20,10 +20,9 @@ from numba import jit
 from dataloader_multivariate import CasasDataset
 from datetime import datetime
 from dateutil.rrule import rrule, DAILY,SECONDLY
-
+import os
 
 def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='', signal = '', hyperbolic = False, path='', signal_shape=100, params=''):
-    # df = pd.read_csv(read_path)
     # path = './data'
 
     recons_signal=[]
@@ -34,57 +33,81 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
     hyper_real = []
     eucl_recons = []
     path+='/'
-    decoder = decoder.eval()
-    encoder = encoder.eval()
 
+    decoder.eval()
+    encoder.eval()
+    critic_x.eval()
+    rec_error_type=params.rec_error
+    combination=params.addition_type
     for batch, (sample,index,y,y_index,x_index) in enumerate(test_loader):
+      if encoder.hyperbolic:
+        x, hyper_z = encoder(sample.float().cuda())
+        hyper_recons_z.append(torch.squeeze(hyper_z).cpu().detach().numpy())
+      else: x = encoder(sample.float().cuda())
+      
+      if decoder.hyperbolic:
+        hyper, eucl = decoder(x)
+        hyper_x = decoder.hyperbolic_linear(sample.view(-1,signal_shape).float().cuda())
 
-      if sample.shape[0] != 1:
-        if encoder.hyperbolic:
-          x, hyper_z = encoder(sample.float().cuda())
-          hyper_recons_z.append(torch.squeeze(hyper_z).cpu().detach().numpy())
-        else: x = encoder(sample.float().cuda())
+        # recons_signal.append(torch.squeeze(hyper).cpu().detach().numpy())
+        # eucl_recons.append(torch.squeeze(eucl).cpu().detach().numpy())
+        # hyper_real.append(torch.squeeze(hyper_x).cpu().detach().numpy())
         
-        if decoder.hyperbolic:
-          hyper, eucl = decoder(x)
-          hyper_x = decoder.hyperbolic_linear(sample.view(-1,signal_shape).float().cuda())
-
+        if sample.shape[0] == 1:
+          recons_signal.append(torch.squeeze(hyper).cpu().detach().numpy().reshape(1,100))
+          eucl_recons.append(torch.squeeze(eucl).cpu().detach().numpy().reshape(1,100))
+          hyper_real.append(torch.squeeze(hyper_x).cpu().detach().numpy().reshape(1,100))
+          critic_score.extend(critic_x(sample.cuda()).cpu().detach().numpy().reshape(-1))
+        else: 
           recons_signal.append(torch.squeeze(hyper).cpu().detach().numpy())
           eucl_recons.append(torch.squeeze(eucl).cpu().detach().numpy())
           hyper_real.append(torch.squeeze(hyper_x).cpu().detach().numpy())
-
-        else: 
-          reconstructed_signal = decoder(x)
+          critic_score.extend(torch.squeeze(critic_x(sample.cuda())).cpu().detach().numpy())
+      else: 
+        reconstructed_signal = decoder(x)
+        if sample.shape[0] == 1:
+          recons_signal.append(reconstructed_signal.cpu().detach().numpy().reshape(1,100))
+          critic_score.extend(critic_x(sample.cuda()).cpu().detach().numpy().reshape(-1))
+        else:
           recons_signal.append(torch.squeeze(reconstructed_signal).cpu().detach().numpy())
+          critic_score.extend(torch.squeeze(critic_x(sample.cuda())).cpu().detach().numpy())
 
-        true_signal.append(sample.numpy())
-        critic_score.extend(torch.squeeze(critic_x(sample.cuda())).cpu().detach().numpy())
-    
-    if len(recons_signal[-1].shape) == 1:
-      if decoder.hyperbolic:
-        eucl_recons = np.append(np.concatenate(eucl_recons[:-1]),eucl_recons[-1].reshape(1,-1),axis=0)
-        recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
-        hyper_real = np.append(np.concatenate(hyper_real[:-1]),hyper_real[-1].reshape(1,-1),axis=0)
-      else:
-        recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
-        critic_score = np.append(np.concatenate(critic_score[:-1]),critic_score[-1].reshape(1,-1),axis=0)
-      if encoder.hyperbolic:
-        hyper_recons_z = np.append(np.concatenate(hyper_recons_z[:-1]),hyper_recons_z[-1].reshape(1,-1),axis=0)
+      true_signal.append(sample.numpy())
+        
 
-    else:
-      recons_signal = np.concatenate(recons_signal)
-      true_signal = np.concatenate(true_signal)
-      torch.save(recons_signal, path+'recons_signal.pt')
-      torch.save(true_signal, path+'gt_signal.pt')
+      # else:
+      #   print(sample.shape[0])
+    # if len(recons_signal[-1].shape) == 1:
+    #   if decoder.hyperbolic:
+    #     eucl_recons = np.append(np.concatenate(eucl_recons[:-1]),eucl_recons[-1].reshape(1,-1),axis=0)
+    #     recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
+    #     hyper_real = np.append(np.concatenate(hyper_real[:-1]),hyper_real[-1].reshape(1,-1),axis=0)
+    #   else:
+    #     recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
+    #     # critic_score = np.append(np.concatenate(critic_score[:-1]),critic_score[-1].reshape(1,-1),axis=0)
+    #   if encoder.hyperbolic:
+    #     hyper_recons_z = np.append(np.concatenate(hyper_recons_z[:-1]),hyper_recons_z[-1].reshape(1,-1),axis=0)
 
-      if decoder.hyperbolic:
-        true_signal = np.concatenate(hyper_real)
-        torch.save(critic_score, 'critic_score.pt')
-        torch.save(recons_signal, path+'recons_hyper.pt')
-        torch.save(true_signal, path+'real_hyper.pt')
-      if encoder.hyperbolic:
-        hyper_recons_z = np.concatenate(hyper_recons_z)
-        torch.save(hyper_recons, path+'hyper_recons_z.pt')
+    # else:
+    recons_signal = np.concatenate(recons_signal)
+    gt_signal = np.concatenate(true_signal)
+    torch.save(recons_signal, path+'recons_signal.pt')
+    torch.save(gt_signal, path+'gt_signal.pt')
+    true_signal = np.concatenate(true_signal)
+    torch.save(critic_score, path+'critic_score.pt')
+    try:
+      torch.save(index[0], path+'true_index.pt')
+    except:pass
+    if decoder.hyperbolic:
+      true_signal = np.concatenate(hyper_real)
+      eucl_recons = np.concatenate(eucl_recons)
+      torch.save(critic_score, path+'critic_score.pt')
+      torch.save(eucl_recons, path+'eucl_recons.pt')
+      torch.save(recons_signal, path+'recons_hyper.pt')
+      torch.save(true_signal, path+'real_hyper.pt')
+    if encoder.hyperbolic:
+      hyper_recons_z = np.concatenate(hyper_recons_z)
+      torch.save(hyper_recons, path+'hyper_recons_z.pt')
 
     if params.dataset == 'new_CASAS':
         #just creating some random datetime index for the plots
@@ -96,22 +119,21 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
         y=y[0]
         y=torch.load('./data/CASAS/new_dataset/{}/y_test'.format(params.signal))
         y = y.reshape(y.shape[0]*y.shape[1], -1)[:x_index.shape[0]]
-
         if not params.hyperbolic:
           error, true_index, true, pred = score_anomalies(true_signal[:recons_signal.shape[0]].reshape(-1,params.signal_shape,1), 
                                                           recons_signal.reshape(-1,params.signal_shape,1), 
                                                           critic_score[:recons_signal.shape[0]], 
                                                           x_index, 
-                                                          rec_error_type="point", 
-                                                          comb="mult")
+                                                          rec_error_type=rec_error_type, 
+                                                          comb=combination)
           torch.save(true_index, path+'true_index.pt')
           torch.save(error, path+'error.pt')
           intervals = find_anomalies(error[:recons_signal.shape[0]].reshape(-1), true_index, 
-                                window_size_portion=0.2, 
+                                window_size_portion=0.33, 
                                 window_size=1410,
                                 window_step_size_portion=None, 
                                 fixed_threshold=True,
-                                anomaly_padding=200)
+                                anomaly_padding=50)
         else:
           true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
           pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
@@ -121,7 +143,8 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
           x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
           dist = torch.acosh(x_temp)
           
-          #using poincarè distances btw gt and preds as my errors
+          torch.save(x_index, path+'true_index.pt')
+          #using poincarÃ¨ distances between gt and preds as errors
           intervals = find_anomalies(dist, x_index, 
                                 window_size_portion=0.2, 
                                 window_size=1410,
@@ -159,48 +182,88 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
         gmean = np.sqrt(precision*recall)
         print('f1_score: {}, gmean: {}'.format(F1,gmean))
 
+
     else:
         df = pd.read_csv(read_path)
 
-        x_index = x_index[0]
+        x_index = index[0]
         true_index = x_index
+
         if not params.hyperbolic:
           error, true_index, true, pred = score_anomalies(true_signal, 
                                                           recons_signal, 
                                                           critic_score, 
                                                           x_index, 
-                                                          rec_error_type="dtw", 
-                                                          comb="mult")
+                                                          rec_error_type=rec_error_type, 
+                                                          comb=combination)
+          torch.save(x_index, path+'true_index.pt')
+
         else:
-          true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
-          pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
-          sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
-          squnorm = torch.sum(pred_data ** 2, dim=-1)
-          sqvnorm = torch.sum(true_data ** 2, dim=-1)
-          x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
-          error = torch.acosh(x_temp)
-          #using poincarè distances between gt and preds as errors
+          # true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
+          # pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
+          # sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
+          # squnorm = torch.sum(pred_data ** 2, dim=-1)
+          # sqvnorm = torch.sum(true_data ** 2, dim=-1)
+          # x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
+          # error = torch.acosh(x_temp)
+
+          # smoothing_window = math.trunc(true_signal.shape[0] * 0.01)
+          # error = pd.Series(error).rolling(
+          #         smoothing_window, center=True, min_periods=smoothing_window // 2).mean().values
+
+          #using poincarÃ¨ distances between gt and preds as errors
+          torch.save(x_index, path+'true_index.pt')
+          # critic_smooth_window = math.trunc(recons_signal.shape[0] * 0.01)
+          # critic_scores = _compute_critic_score(critic_score, critic_smooth_window)
+          # error=error*critic_scores
+          # recons_eucl = gmath.logmap0(torch.Tensor(eucl_recons), k=torch.tensor(-1.), dim=1).float()
+          # real_eucl = gmath.logmap0(torch.Tensor(gt_signal), k=torch.tensor(-1.), dim=1).float()
+
+          error, true_index, true, pred = score_anomalies(np.expand_dims(gt_signal,2), 
+                                                          np.expand_dims(eucl_recons,2), 
+                                                          critic_score, 
+                                                          x_index, 
+                                                          rec_error_type=rec_error_type, 
+                                                          comb=combination)
 
         intervals = find_anomalies(error.reshape(-1), true_index, 
                                   window_size_portion=0.33, 
                                   window_step_size_portion=0.1, 
                                   fixed_threshold=True)
         
-        # visualize the result
-        anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
-        print(anomalies[['start','end']])
-        anomalies.to_csv(path+'anomalies.csv')
-        
         try:
-          anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
-          plot(df, [anomalies], signal, path)  
-          print(known_anomalies)
-          print(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
-          plot(df, [anomalies, known_anomalies], signal, path)        
+            anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
+            anomalies.to_csv(path+'anomalies.csv')
+
+            plot(df, [anomalies, known_anomalies], signal, path)        
+            print(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
+            out=list(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
+
+            tn, fp, fn, tp = contextual_confusion_matrix(known_anomalies, anomalies, weighted=False)
+            precision = tp/(tp+fp)
+            recall = tp/(tp+fn)
+
+            F1 = 2 * (precision * recall) / (precision + recall)
+
         except:
-          plot(df, [known_anomalies], signal, path)   
+ 
+            # plot(df, [known_anomalies], signal, path)   
+            out = [0,0,0,0]
+            F1=0
+        
+        print('f1_score: {}'.format(F1))
 
+        if params.save_result:
+          file_place = './results/{}'.format(params.filename)
 
+          if os.path.isfile(file_place):
+            res = pd.read_csv(file_place) 
+          else:
+            res = pd.DataFrame(columns=['signal','fn','fp','tn','tp'])
+
+          out=[signal]+out
+          res.loc[len(res)] = out
+          res.to_csv(file_place, index=False)
 
 
 def test_lstm(test_loader, model, known_anomalies, path, signal = ''):
@@ -314,7 +377,7 @@ def _compute_critic_score(critics, smooth_window):
 
 def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_window=None,
                     error_smooth_window=None, smooth=True, rec_error_type="point", comb="mult",
-                    lambda_rec=0.5):
+                    lambda_rec=0.5,path=None):
     """Compute an array of anomaly scores.
     Anomaly scores are calculated using a combination of reconstruction error and critic score.
     Args:
@@ -354,7 +417,6 @@ def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_wind
 
     critic_smooth_window = critic_smooth_window or math.trunc(y.shape[0] * 0.01)
     error_smooth_window = error_smooth_window or math.trunc(y.shape[0] * 0.01)
-
     step_size = 1  # expected to be 1
 
     true_index = index  # no offset
@@ -364,43 +426,66 @@ def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_wind
     for item in y[-1][1:]:
         true.extend(item)
 
-    critic_extended = list()
-    for c in critic:
-        critic_extended.extend(np.repeat(c, y_hat.shape[1]).tolist())
+    if (not path) or (path and not os.path.exists(path+'critic_scores.pickle')):
+        critic_extended = list()
+        for c in critic:
+            critic_extended.extend(np.repeat(c, y_hat.shape[1]).tolist())
+        critic_extended = np.asarray(critic_extended).reshape((-1, y_hat.shape[1]))
+        
+        critic_kde_max = []
+        pred_length = y_hat.shape[1]
+        num_errors = y_hat.shape[1] + step_size * (y_hat.shape[0] - 1)
 
-    critic_extended = np.asarray(critic_extended).reshape((-1, y_hat.shape[1]))
+        for i in range(num_errors):
+            critic_intermediate = []
 
-    critic_kde_max = []
-    pred_length = y_hat.shape[1]
-    num_errors = y_hat.shape[1] + step_size * (y_hat.shape[0] - 1)
+            for j in range(max(0, i - num_errors + pred_length), min(i + 1, pred_length)):
+                critic_intermediate.append(critic_extended[i - j, j])
 
-    for i in range(num_errors):
-        critic_intermediate = []
+            if len(critic_intermediate) > 1:
+                discr_intermediate = np.asarray(critic_intermediate)
+                try:
+              
+                    critic_kde_max.append(discr_intermediate[np.argmax(
+                        stats.gaussian_kde(discr_intermediate)(critic_intermediate))])
+                except np.linalg.LinAlgError:
+                    critic_kde_max.append(np.median(discr_intermediate))
+            else:
+                critic_kde_max.append(np.median(np.asarray(critic_intermediate)))
 
-        for j in range(max(0, i - num_errors + pred_length), min(i + 1, pred_length)):
-            critic_intermediate.append(critic_extended[i - j, j])
+        # Compute critic scores
+        critic_scores = _compute_critic_score(critic_kde_max, critic_smooth_window)
+        
+        
+        if path:
+          with open(path+'critic_scores.pickle', 'wb') as handle:
+                pickle.dump(critic_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+          # with open(path+'rec_scores.pickle', 'wb') as handle:
+          #       pickle.dump(rec_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-        if len(critic_intermediate) > 1:
-            discr_intermediate = np.asarray(critic_intermediate)
-            try:
-                critic_kde_max.append(discr_intermediate[np.argmax(
-                    stats.gaussian_kde(discr_intermediate)(critic_intermediate))])
-            except np.linalg.LinAlgError:
-                critic_kde_max.append(np.median(discr_intermediate))
-        else:
-            critic_kde_max.append(np.median(np.asarray(critic_intermediate)))
+    else:
+          with open(path+'critic_scores.pickle', 'rb') as handle:
+            critic_scores = pickle.load(handle)
+          # with open(path+'rec_scores.pickle', 'rb') as handle:
+          #   rec_scores = pickle.load(handle)
+          #   predictions = []
+  
+    if (not path) or (path and not os.path.exists(path+rec_error_type+'.pickle')):
 
-    # Compute critic scores
-    critic_scores = _compute_critic_score(critic_kde_max, critic_smooth_window)
-    torch.save(critic_scores, 'critic_score.pt')
-    
-    # Compute reconstruction scores
-    rec_scores, predictions = reconstruction_errors(
-        y, y_hat, step_size, score_window, error_smooth_window, smooth, rec_error_type)
-    
-    rec_scores = stats.zscore(rec_scores)
-    rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
+        # Compute reconstruction scores
+        rec_scores, predictions = reconstruction_errors(
+            y, y_hat, step_size, score_window, error_smooth_window, smooth, rec_error_type)
+        
+        rec_scores = stats.zscore(rec_scores)
+        rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
 
+        if path:
+          with open(path+rec_error_type+'.pickle', 'wb') as handle:
+                pickle.dump(rec_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    else:
+        with open(path+rec_error_type+'.pickle', 'rb') as handle:
+            rec_scores = pickle.load(handle)
+            predictions=[]
     # Combine the two scores
     if comb == "mult":
         final_scores = np.multiply(critic_scores, rec_scores)
@@ -733,7 +818,7 @@ def reconstruction_errors(y, y_hat, step_size=1, score_window=10, smoothing_wind
     for i in range(num_errors):
         intermediate = []
         for j in range(max(0, i - num_errors + pred_length), min(i + 1, pred_length)):
-            intermediate.append(abs(y_hat[i - j, j]))
+            intermediate.append(y_hat[i - j, j])
         if intermediate:
             predictions.append(np.median(np.asarray(intermediate)))
 
@@ -745,11 +830,9 @@ def reconstruction_errors(y, y_hat, step_size=1, score_window=10, smoothing_wind
                 np.max(np.asarray(intermediate))
             ]])
 
-    true = abs(np.asarray(true))
+    true = np.asarray(true)
     predictions = np.asarray(predictions)
     predictions_vs = np.asarray(predictions_vs)
-    torch.save(predictions, 'predictions.pt')
-    torch.save(true, 'true.pt')
 
     # Compute reconstruction errors
     if rec_error_type.lower() == "point":
@@ -762,13 +845,11 @@ def reconstruction_errors(y, y_hat, step_size=1, score_window=10, smoothing_wind
     elif rec_error_type.lower() == "dtw":
         errors = _dtw_error(true, predictions, score_window)
 
-    torch.save(errors, 'before_smooth.pt')
 
     # Apply smoothing
     if smooth:
         errors = pd.Series(errors).rolling(
             smoothing_window, center=True, min_periods=smoothing_window // 2).mean().values
-    torch.save(errors, 'dtw_errors.pt')
     return errors, predictions_vs
 
 
@@ -1168,8 +1249,8 @@ def _find_window_sequences(window, z_range, anomaly_padding, min_percent, window
     return window_sequences
 
 
-def find_anomalies(errors, index, z_range=(0, 12), window_size=100, window_size_portion=None,
-                   window_step_size=200, window_step_size_portion=None, min_percent=0.13,
+def find_anomalies(errors, index, z_range=(0, 10), window_size=None, window_size_portion=None,
+                   window_step_size=None, window_step_size_portion=None, min_percent=0.1,
                    anomaly_padding=50, lower_threshold=False, fixed_threshold=None):
     """Find sequences of error values that are anomalous.
 
@@ -1229,7 +1310,7 @@ def find_anomalies(errors, index, z_range=(0, 12), window_size=100, window_size_
     window_start = 0
     window_end = 0
     sequences = list()
-
+    
     while window_end < len(errors):
         window_end = window_start + window_size
         window = errors[window_start:window_end]
@@ -1252,6 +1333,12 @@ def find_anomalies(errors, index, z_range=(0, 12), window_size=100, window_size_
 
     anomalies = list()
 
+    # for start, stop, score in sequences:
+
+    #     if start < index.shape[0]:
+    #       if stop < index.shape[0]:pass
+    #       else: stop = index.shape[0]-1
+    #       anomalies.append([index[int(start)], index[int(stop)], score])
     for start, stop, score in sequences:
         anomalies.append([index[int(start)], index[int(stop)], score])
 
@@ -1348,8 +1435,8 @@ if __name__ == "__main__":
 
     elif params.model == 'tadgan':
       signal_shape = params.signal_shape
-      if params.hyperbolic: PATH = './models/'+ params.signal
-      else: PATH = './models_eucl/'+ params.signal
+      if params.hyperbolic: PATH = './models_{}_{}_{}/'.format(params.dataset,str(params.epochs),str(params.lr))+ params.signal
+      else: PATH = './models_eucl_{}_{}_{}/'.format(params.dataset,str(params.epochs),str(params.lr))+ params.signal
 
       encoder = torch.load(PATH+'/encoder.pt').cuda()
       decoder = torch.load(PATH+'/decoder.pt').cuda()

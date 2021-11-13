@@ -113,7 +113,6 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
         #just creating some random datetime index for the plots
         random_index = list(rrule(SECONDLY, dtstart=datetime(2012, 11, 24), until=datetime(2012,11,30)))[:recons_signal.shape[0]]
         x_index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
-        index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
         torch.save(x_index, path+'x_index.pt')
 
         y=y[0]
@@ -144,7 +143,7 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
           dist = torch.acosh(x_temp)
           
           torch.save(x_index, path+'true_index.pt')
-          #using poincarÃ¨ distances between gt and preds as errors
+          #using poincarè distances between gt and preds as errors
           intervals = find_anomalies(dist, x_index, 
                                 window_size_portion=0.2, 
                                 window_size=1410,
@@ -211,7 +210,7 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
           # error = pd.Series(error).rolling(
           #         smoothing_window, center=True, min_periods=smoothing_window // 2).mean().values
 
-          #using poincarÃ¨ distances between gt and preds as errors
+          #using poincarè distances between gt and preds as errors
           torch.save(x_index, path+'true_index.pt')
           # critic_smooth_window = math.trunc(recons_signal.shape[0] * 0.01)
           # critic_scores = _compute_critic_score(critic_score, critic_smooth_window)
@@ -1394,14 +1393,20 @@ if __name__ == "__main__":
 
     else:
 
-      if params.signal == 'nyc_taxi':
-        train_data = od.load_signal('nyc_taxi')
-        test_data = od.load_signal('nyc_taxi')
+      if params.unique_dataset:
+          train_data = od.load_signal(params.signal)
+          test_data = od.load_signal(params.signal)
 
-        train_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),interval=1800)
-        test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=1800)
-        demo=True
-        path = './data/{}.csv'
+          train_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),interval=params.interval)
+          test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=params.interval)
+          path = './data/{}.csv'
+          read_path=path.format(params.signal)
+
+      elif params.dataset in ['A1','A2','A3','A4']:
+
+          train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1)
+          test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1)
+          read_path = './data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal)
 
       else:
         train_data = od.load_signal(params.signal +'-train')
@@ -1448,12 +1453,12 @@ if __name__ == "__main__":
       critic_x.eval()
       critic_z.eval()
 
-      if params.dataset not in ['CASAS', 'new_CASAS']:
-        if params.signal in signal_list:
-          known_anomalies = pd.DataFrame()
-        else:
+      if params.dataset in  ['CASAS','new_CASAS']  :
+          known_anomalies=[]
+      elif params.dataset in ['A1','A2','A3','A4']:
+          known_anomalies = pd.read_csv(read_path[:-4]+'_known_anomalies.csv')
+      else: 
           known_anomalies = od.load_anomalies(params.signal)
-      else: known_anomalies=[]
 
       if demo:
         test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=path.format(params.signal), signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, params=params)

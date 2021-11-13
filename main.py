@@ -14,7 +14,9 @@ import torch.optim as optim
 from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
 
-import anomaly_detector
+import model_LSTM
+import anomaly_detection_lstm
+import anomaly_refactor
 
 from utils import parse_args
 import data as od
@@ -127,7 +129,7 @@ def encoder_iteration(sample):
       gen_x,eucl = decoder(enc_z)
       hyper_x = decoder.hyperbolic_linear(x.view(-1,signal_shape))
 
-      #poincarÃ¨ distance
+      #poincarè distance
       sqdist = torch.sum((gen_x - hyper_x) ** 2, dim=-1)
       squnorm = torch.sum(gen_x ** 2, dim=-1)
       sqvnorm = torch.sum(hyper_x ** 2, dim=-1)
@@ -362,20 +364,28 @@ if __name__ == "__main__":
         read_path = ''
     else:
         if params.unique_dataset:
-          train_data = od.load_signal(params.signal)
-          test_data = od.load_signal(params.signal)
+            train_data = od.load_signal(params.signal)
+            test_data = od.load_signal(params.signal)
 
-          train_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),interval=params.interval)
-          test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=params.interval)
-          path = './data/{}.csv'
-          read_path=path.format(params.signal)
+            train_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),interval=params.interval)
+            test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=params.interval)
+            path = './data/{}.csv'
+            read_path=path.format(params.signal)
+
+        elif params.dataset in ['A1','A2','A3','A4']:
+
+            train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1)
+            test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1)
+            read_path = './data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal)
+            
+
         else:
-          train_data = od.load_signal(params.signal +'-train')
-          test_data = od.load_signal(params.signal +'-test')
+            train_data = od.load_signal(params.signal +'-train')
+            test_data = od.load_signal(params.signal +'-test')
 
-          train_dataset = SignalDataset(path='./data/{}-train.csv'.format(params.signal),interval=params.interval)
-          test_dataset = SignalDataset(path='./data/{}-test.csv'.format(params.signal),interval=params.interval,test=True)
-          read_path='./data/{}-test.csv'.format(params.signal)
+            train_dataset = SignalDataset(path='./data/{}-train.csv'.format(params.signal),interval=params.interval)
+            test_dataset = SignalDataset(path='./data/{}-test.csv'.format(params.signal),interval=params.interval,test=True)
+            read_path='./data/{}-test.csv'.format(params.signal)
 
     batch_size = params.batch_size
     train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True,shuffle=True,num_workers=6)
@@ -451,11 +461,14 @@ if __name__ == "__main__":
       torch.save(critic_x, PATH+'/critic_x.pt')
       torch.save(critic_z, PATH+'/critic_z.pt')
 
-      if params.dataset not in  ['CASAS','new_CASAS']  :
+      if params.dataset in  ['CASAS','new_CASAS']  :
+          known_anomalies=[]
+      elif params.dataset in ['A1','A2','A3','A4']:
+          known_anomalies = pd.read_csv(read_path[:-4]+'_known_anomalies.csv')
+      else: 
           known_anomalies = od.load_anomalies(params.signal)
-      else: known_anomalies=[]
 
-      anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=read_path, signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)
+      anomaly_refactor.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=read_path, signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)
       
 
     

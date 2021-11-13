@@ -14,9 +14,7 @@ import torch.optim as optim
 from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
 
-import model_LSTM
-import anomaly_detection_lstm
-import anomaly_refactor
+import anomaly_detection
 
 from utils import parse_args
 import data as od
@@ -469,7 +467,7 @@ if __name__ == "__main__":
       else: 
           known_anomalies = od.load_anomalies(params.signal)
 
-      anomaly_refactor.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=read_path, signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)
+      anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=read_path, signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)
       
 
     

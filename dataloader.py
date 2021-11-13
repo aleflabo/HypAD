@@ -7,6 +7,7 @@ import torch
 from datetime import datetime
 from dateutil.rrule import rrule, DAILY,SECONDLY
 import os 
+from scipy import signal as scipy_signal
 
 def _detrend_signal(df, value_column):
     df[value_column] = scipy_signal.detrend(df[value_column])
@@ -23,7 +24,7 @@ def save_known_anomalies(df,path):
               end = grouped['timestamp'].iloc[-1]
               anomalies = pd.concat([pd.DataFrame([[start,end]]), anomalies],ignore_index=True)
           anomalies.columns = ['start','end']
-          pd.to_csv(path[:-4]+'_known_anomalies.csv')
+          anomalies.to_csv(path[:-4]+'_known_anomalies.csv')
       else:pass
       
 class SignalDataset(Dataset):
@@ -37,7 +38,7 @@ class SignalDataset(Dataset):
             self.signal_df['timestamp'] = x_index
 
             save_known_anomalies(self.signal_df,path)
-
+            self.signal_df = self.signal_df[['timestamp','value']]
 
         self.interval = interval
         self.windows_size = windows_size

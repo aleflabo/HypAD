@@ -7,8 +7,7 @@ import torch
 from datetime import datetime
 
 class SignalDataset(Dataset):
-    def __init__(self, path, interval=21600, windows_size=100, test=False, user_id=None):
-        #same preprocessing as tadgan paper
+    def __init__(self, path, interval=21600, windows_size=100, test=False):
         self.signal_df = pd.read_csv(path)
         self.interval = interval
         self.windows_size = windows_size
@@ -150,5 +149,6 @@ class SignalDataset(Dataset):
           return x, self.index, self.y, self.y_index, self.X_index
         return x
 
+        # return {'value':x, 'anomaly':row['anomaly']}
 
 

@@ -9,23 +9,45 @@ from dateutil.rrule import rrule, DAILY,SECONDLY
 import os 
 from scipy import signal as scipy_signal
 
+def save_known_anomalies(df,path):
+      # if not os.path.exists(path[:-4]+'_known_anomalies.csv'):
+      try:  
+          df['csum'] = (df['is_anomaly'] != df['is_anomaly'].shift()).cumsum()
+      except:
+          df = df[['timestamp',	'value',	'anomaly']].copy().sort_values(by=['timestamp'])
+          df.columns = ['timestamp',	'value',	'is_anomaly']
+          df['csum'] = (df['is_anomaly'] != df['is_anomaly'].shift()).cumsum()
+      anomalies = pd.DataFrame()
+      for group in df[df['is_anomaly'] == 1]['csum'].unique():
+          grouped = df[df['is_anomaly'] == 1].groupby(df['csum']).get_group(group)
+          start = grouped['timestamp'].iloc[0]
+          end = grouped['timestamp'].iloc[-1]
+          anomalies = pd.concat([pd.DataFrame([[start,end]]), anomalies],ignore_index=True)
+      anomalies.columns = ['start','end']
+      anomalies.to_csv(path[:-4]+'_known_anomalies.csv')
+      return df
+      # else:pass
+      
 def _detrend_signal(df, value_column):
     df[value_column] = scipy_signal.detrend(df[value_column])
     return df
 
-def save_known_anomalies(df,path):
-      if not os.path.exists(path[:-4]+'_known_anomalies.csv'):
-          y = df[df['is_anomaly'] == 1]
+def yahoo_preprocess(df):
+      df = _detrend_signal(df,'value')
+      random_index = list(rrule(SECONDLY, dtstart=datetime(2012, 11, 24), until=datetime(2012,11,30)))[:len(df)]
+      x_index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
+      df['timestamp'] = x_index
+
+      # df = save_known_anomalies(df,path)
+      try:  
           df['csum'] = (df['is_anomaly'] != df['is_anomaly'].shift()).cumsum()
-          anomalies = pd.DataFrame()
-          for group in df[df['is_anomaly'] == 1]['csum'].unique():
-              grouped = df[df['is_anomaly'] == 1].groupby(df['csum']).get_group(group)
-              start = grouped['timestamp'].iloc[0]
-              end = grouped['timestamp'].iloc[-1]
-              anomalies = pd.concat([pd.DataFrame([[start,end]]), anomalies],ignore_index=True)
-          anomalies.columns = ['start','end']
-          anomalies.to_csv(path[:-4]+'_known_anomalies.csv')
-      else:pass
+      except:
+          df = df[['timestamp',	'value',	'anomaly']].copy().sort_values(by=['timestamp'])
+          df.columns = ['timestamp',	'value',	'is_anomaly']
+          df['csum'] = (df['is_anomaly'] != df['is_anomaly'].shift()).cumsum()
+
+      df = df[['timestamp','value']]
+      return df
       
 class SignalDataset(Dataset):
     def __init__(self, path, interval=21600, windows_size=100, test=False, yahoo=None):
@@ -37,7 +59,7 @@ class SignalDataset(Dataset):
             x_index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
             self.signal_df['timestamp'] = x_index
 
-            save_known_anomalies(self.signal_df,path)
+            self.signal_df = save_known_anomalies(self.signal_df,path)
             self.signal_df = self.signal_df[['timestamp','value']]
 
         self.interval = interval

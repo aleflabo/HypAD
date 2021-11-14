@@ -21,6 +21,7 @@ from dataloader_multivariate import CasasDataset
 from datetime import datetime
 from dateutil.rrule import rrule, DAILY,SECONDLY
 import os
+from dataloader import yahoo_preprocess, _detrend_signal
 
 def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='', signal = '', hyperbolic = False, path='', signal_shape=100, params=''):
     # path = './data'
@@ -119,14 +120,51 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
         y=torch.load('./data/CASAS/new_dataset/{}/y_test'.format(params.signal))
         y = y.reshape(y.shape[0]*y.shape[1], -1)[:x_index.shape[0]]
         if not params.hyperbolic:
-          error, true_index, true, pred = score_anomalies(true_signal[:recons_signal.shape[0]].reshape(-1,params.signal_shape,1), 
-                                                          recons_signal.reshape(-1,params.signal_shape,1), 
-                                                          critic_score[:recons_signal.shape[0]], 
-                                                          x_index, 
-                                                          rec_error_type=rec_error_type, 
-                                                          comb=combination)
-          torch.save(true_index, path+'true_index.pt')
-          torch.save(error, path+'error.pt')
+          step_size = 1
+          smooth=True
+          score_window=10
+          smoothing_window = math.trunc(recons_signal.shape[0] * 0.01)
+
+          rec_scores = np.linalg.norm(true_signal-recons_signal,axis=1)
+          # rec_scores = pd.Series(rec_scores).rolling(
+          #     smoothing_window, center=True, min_periods=smoothing_window // 2).mean().values
+
+          rec_scores = stats.zscore(rec_scores)
+          rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
+
+          critic_smooth_window = math.trunc(true_signal.shape[0] * 0.01)
+
+          critic_extended = list()
+          for c in critic_score:
+              critic_extended.extend(np.repeat(c, true_signal.shape[1]).tolist())
+          critic_extended = np.asarray(critic_extended).reshape((-1, true_signal.shape[1]))
+
+          critic_kde_max = []
+          pred_length = true_signal.shape[1]
+          num_errors = true_signal.shape[1] + step_size * (true_signal.shape[0] - 1)
+
+          for i in range(num_errors):
+              critic_intermediate = []
+
+              for j in range(max(0, i - num_errors + pred_length), min(i + 1, pred_length)):
+                  critic_intermediate.append(critic_extended[i - j, j])
+
+              if len(critic_intermediate) > 1:
+                  discr_intermediate = np.asarray(critic_intermediate)
+                  try:
+                  
+                      critic_kde_max.append(discr_intermediate[np.argmax(
+                          stats.gaussian_kde(discr_intermediate)(critic_intermediate))])
+                  except np.linalg.LinAlgError:
+                      critic_kde_max.append(np.median(discr_intermediate))
+              else:
+                  critic_kde_max.append(np.median(np.asarray(critic_intermediate)))
+
+          # Compute critic scores
+          critic_scores = _compute_critic_score(critic_kde_max, critic_smooth_window)
+
+          error = rec_scores*critic_scores[:rec_scores.shape[0]]
+
           intervals = find_anomalies(error[:recons_signal.shape[0]].reshape(-1), true_index, 
                                 window_size_portion=0.33, 
                                 window_size=1410,
@@ -1404,8 +1442,8 @@ if __name__ == "__main__":
 
       elif params.dataset in ['A1','A2','A3','A4']:
 
-          train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1)
-          test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1)
+          train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1,yahoo=True)
+          test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1,yahoo=True)
           read_path = './data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal)
 
       else:

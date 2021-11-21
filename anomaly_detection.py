@@ -221,7 +221,10 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
 
 
     else:
-        df = pd.read_csv(read_path)
+        if params.dataset in ['A1','A2','A3','A4']:
+          df = yahoo_preprocess(pd.read_csv(read_path))
+        else: 
+          df = pd.read_csv(read_path)
 
         x_index = index[0]
         true_index = x_index

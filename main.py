@@ -301,44 +301,6 @@ def train_tadgan(encoder, decoder, critic_x, critic_z, n_epochs=2000, params=Non
         #     torch.save(critic_z.state_dict(), critic_z.critic_z_path)
 
 
-def train_lstm(model,optimizer,train_loader,test_loader,n_epochs=2000):
-    logging.debug('Starting training')
-    
-
-    mse_loss = torch.nn.MSELoss()
-    
-    
-    for epoch in range(n_epochs):
-        logging.debug('Epoch {}'.format(epoch))
-        train_losses = []
-        model = model.train()
-        for batch, sample in enumerate(train_loader):
-            optimizer.zero_grad()
-            sample = sample.cuda().reshape(-1,100)
-            sample_pred = model(sample.float()).reshape(-1,100)
-            loss = mse_loss(sample_pred.float(), sample.float())
-
-            loss.backward()
-            optimizer.step()
-
-            train_losses.append(loss.item())
-            
-        val_losses = []
-        model = model.eval()
-        with torch.no_grad():
-          for batch,(sample,_,_,_,_) in enumerate(test_loader):
-            sample = sample.cuda().reshape(-1,100)
-            sample_pred = model(sample.float()).reshape(-1,100)
-
-            loss = mse_loss(sample_pred.float(), sample.float())
-            val_losses.append(loss.item())
-
-        train_loss = np.mean(train_losses)
-        val_loss = np.mean(val_losses)
-
-        print('Epoch {} train_loss {} val_loss {}'.format(epoch, train_loss, val_loss))
-        if epoch % 10 == 0:
-            torch.save(model.state_dict(), '/content/drive/MyDrive/TadGAN/models/trial.pt')
 
 if __name__ == "__main__":
     params = parse_args()

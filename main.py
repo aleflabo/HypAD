@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!usr/bin/bash python
 # coding: utf-8
 import os
 import logging
@@ -14,7 +14,6 @@ import torch.optim as optim
 from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
 
-import model_LSTM
 import anomaly_detection
 
 from utils import parse_args
@@ -28,6 +27,7 @@ import geoopt.manifolds.stereographic.math as gmath
 from hyperspace.losses import compute_mask,compute_scores
 from hyperspace.utils import *
 
+import torch.optim as optim
 
 logging.basicConfig(filename='train.log', level=logging.DEBUG)
 
@@ -39,7 +39,7 @@ def critic_x_iteration(sample):
     critic_score_valid_x = torch.mean(torch.ones(valid_x.shape).cuda() * valid_x) #Wasserstein Loss
 
     #The sampled z are the anomalous points - points deviating from actual distribution of z (obtained through encoding x)
-    z = torch.empty(1, batch_size, latent_space_dim).uniform_(0, 1)
+    z = torch.Tensor(np.random.normal(size=(1,batch_size, latent_space_dim))).cuda()
     if decoder.hyperbolic:
       #hyperspace not used with the critics at the moment
       x_,eucl = decoder(z.cuda())
@@ -62,11 +62,12 @@ def critic_x_iteration(sample):
     #Maximizing the above is same as minimizing the negative.
     wl = critic_score_fake_x - critic_score_valid_x
     loss = wl + gp_loss
-    loss.backward()
+    loss.backward(retain_graph=True)
     optim_cx.step()
 
     return loss
 
+    
 def critic_z_iteration(sample):
     optim_cz.zero_grad()
 
@@ -94,7 +95,7 @@ def critic_z_iteration(sample):
     gp_loss = torch.sqrt(torch.sum(torch.square(gradients).view(-1)))
 
     loss = wl + gp_loss
-    loss.backward()
+    loss.backward(retain_graph=True)
     optim_cz.step()
 
     return loss
@@ -107,7 +108,8 @@ def encoder_iteration(sample):
     valid_x = torch.squeeze(valid_x)
     critic_score_valid_x = torch.mean(torch.ones(valid_x.shape).cuda() * valid_x) #Wasserstein Loss
 
-    z = torch.empty(1, batch_size, latent_space_dim).uniform_(0, 1).cuda()
+    z = torch.Tensor(np.random.normal(size=(1,batch_size, latent_space_dim))).cuda()
+    # z = torch.empty(1, batch_size, latent_space_dim).uniform_(0, 1).cuda()
     if decoder.hyperbolic:
       x_, eucl = decoder(z)
       # x_ = gmath.logmap0(x_, k=torch.tensor(-1.), dim=1).float()
@@ -133,6 +135,9 @@ def encoder_iteration(sample):
       dist = torch.acosh(x_temp)
 
       hyper_loss = torch.div(torch.sum(dist),batch_size)
+      # mse=torch.Tensor([0])
+      # loss_enc = hyper_loss + critic_score_valid_x - critic_score_fake_x
+
       mse = err_loss(eucl.float(), x.float())
       loss_enc = mse + hyper_loss + critic_score_valid_x - critic_score_fake_x
 
@@ -151,11 +156,12 @@ def decoder_iteration(sample):
     optim_dec.zero_grad()
 
     x = sample.view(sequence_shape, batch_size, signal_shape)
+    z = torch.Tensor(np.random.normal(size=(1,batch_size, latent_space_dim))).cuda()
     if encoder.hyperbolic:
       #not used
-      z, _ = encoder(x)
+      z_, _ = encoder(x)
       # mse_loss = err_loss(x.float(), gen_x.float())
-    else: z = encoder(x)
+    else: z_ = encoder(x)
     valid_z = critic_z(z)
     valid_z = torch.squeeze(valid_z)
     critic_score_valid_z = torch.mean(torch.ones(valid_z.shape).cuda() * valid_z)
@@ -182,10 +188,12 @@ def decoder_iteration(sample):
       dist = torch.acosh(x_temp)
 
       hyper_loss = torch.div(torch.sum(dist),batch_size)
+      # mse=torch.Tensor([0])
+      # loss_dec = hyper_loss + critic_score_valid_z + critic_score_fake_z 
 
       mse = err_loss(eucl.float(), x.float())
       loss_dec = mse + hyper_loss + critic_score_valid_z - critic_score_fake_z
-     
+
       loss_dec.backward(retain_graph=True)
       optim_dec.step()
 
@@ -197,7 +205,7 @@ def decoder_iteration(sample):
       mse_loss = err_loss(x.float(), gen_x.float())
       loss_dec = mse_loss + critic_score_valid_z - critic_score_fake_z
 
-      loss_dec.backward(retain_graph=True)
+      loss_dec.backward()
       optim_dec.step()
 
       return loss_dec,0,mse_loss
@@ -214,12 +222,22 @@ def train_tadgan(encoder, decoder, critic_x, critic_z, n_epochs=2000, params=Non
     err_loss = torch.nn.MSELoss()
 
     for epoch in range(n_epochs):
+
         logging.debug('Epoch {}'.format(epoch))
         n_critics = 5
 
         cx_nc_loss = list()
         cz_nc_loss = list()
-
+        
+        for param in decoder.parameters():
+            param.requires_grad = False
+        for param in encoder.parameters():
+            param.requires_grad = False
+        for param in critic_x.parameters():
+            param.requires_grad = True
+        for param in critic_z.parameters():
+            param.requires_grad = True
+        
         for i in range(n_critics):
             cx_loss = list()
             cz_loss = list()
@@ -234,12 +252,23 @@ def train_tadgan(encoder, decoder, critic_x, critic_z, n_epochs=2000, params=Non
             cx_nc_loss.append(torch.mean(torch.tensor(cx_loss)))
             cz_nc_loss.append(torch.mean(torch.tensor(cz_loss)))
 
+
+        for param in decoder.parameters():
+            param.requires_grad = True
+        for param in encoder.parameters():
+            param.requires_grad = True
+        for param in critic_x.parameters():
+            param.requires_grad = False
+        for param in critic_z.parameters():
+            param.requires_grad = False
+
         logging.debug('Critic training done in epoch {}'.format(epoch))
         encoder_loss = list()
         decoder_loss = list()
         hyp_loss = list()
         mse_losss = list()
         for batch, sample in enumerate(train_loader):
+            
             enc_loss = encoder_iteration(sample.cuda())
             dec_loss,hyper_loss,mse_loss = decoder_iteration(sample.cuda())
             encoder_loss.append(enc_loss)
@@ -252,16 +281,18 @@ def train_tadgan(encoder, decoder, critic_x, critic_z, n_epochs=2000, params=Non
         cz_epoch_loss.append(torch.mean(torch.tensor(cz_nc_loss)))
         encoder_epoch_loss.append(torch.mean(torch.tensor(encoder_loss)))
         decoder_epoch_loss.append(torch.mean(torch.tensor(decoder_loss)))
-        if params.hyperbolic:
-          hyp_dec_loss.append(torch.mean(torch.tensor(hyp_loss)))
-        eucl_dec_loss.append(torch.mean(torch.tensor(mse_losss)))
-        logging.debug('Encoder decoder training done in epoch {}'.format(epoch))
-        logging.debug('critic x loss {:.3f} critic z loss {:.3f} \nencoder loss {:.3f} decoder loss {:.3f}\n'.format(cx_epoch_loss[-1], cz_epoch_loss[-1], encoder_epoch_loss[-1], decoder_epoch_loss[-1]))
-        
-        print('Encoder decoder training done in epoch {}'.format(epoch))
-        if params.hyperbolic: print('Hyperbolic loss {}'.format(hyp_dec_loss[-1]))
-        print('Eucl mse loss {}'.format(eucl_dec_loss[-1]))
-        print('critic x loss {:.3f} critic z loss {:.3f} \nencoder loss {:.3f} decoder loss {:.3f}\n'.format(cx_epoch_loss[-1], cz_epoch_loss[-1], encoder_epoch_loss[-1], decoder_epoch_loss[-1]))
+        if params.verbose:
+          if params.hyperbolic:
+            hyp_dec_loss.append(torch.mean(torch.tensor(hyp_loss)))
+          eucl_dec_loss.append(torch.mean(torch.tensor(mse_losss)))
+          # logging.debug('Encoder decoder training done in epoch {}'.format(epoch))
+          # logging.debug('critic x loss {:.3f} critic z loss {:.3f} \nencoder loss {:.3f} decoder loss {:.3f}\n'.format(cx_epoch_loss[-1], cz_epoch_loss[-1], encoder_epoch_loss[-1], decoder_epoch_loss[-1]))
+          
+          print('Encoder decoder training done in epoch {}'.format(epoch))
+          if params.hyperbolic: print('Hyperbolic loss {}'.format(hyp_dec_loss[-1]))
+          print('Eucl mse loss {}'.format(eucl_dec_loss[-1]))
+          print('critic x loss {:.3f} critic z loss {:.3f} \nencoder loss {:.3f} decoder loss {:.3f}\n'.format(cx_epoch_loss[-1], cz_epoch_loss[-1], encoder_epoch_loss[-1], decoder_epoch_loss[-1]))
+          # print('critic x loss {:.3f} critic z loss {:.3f} \n decoder loss {:.3f}\n'.format(cx_epoch_loss[-1], cz_epoch_loss[-1], decoder_epoch_loss[-1]))
 
         # if (epoch % 10 == 0) or (epoch == (n_epochs-1)):
         #     torch.save(encoder.state_dict(), encoder.encoder_path)
@@ -329,22 +360,32 @@ if __name__ == "__main__":
                                      gt_path=path+params.signal, split=params.split, dataset=params.dataset)
         test_dataset = CasasDataset(seq_path=path+params.signal, 
                                      gt_path=path+params.signal, test=True, dataset=params.dataset)
+        read_path = ''
     else:
-        if params.signal == 'nyc_taxi':
-          train_data = od.load_signal('nyc_taxi')
-          test_data = od.load_signal('nyc_taxi')
+        if params.unique_dataset:
+            train_data = od.load_signal(params.signal)
+            test_data = od.load_signal(params.signal)
 
-          train_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),interval=1800)
-          test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=1800)
-          demo=True
-          path = './data/{}.csv'
+            train_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),interval=params.interval)
+            test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=params.interval)
+            path = './data/{}.csv'
+            read_path=path.format(params.signal)
+
+        elif params.dataset in ['A1','A2','A3','A4']:
+
+            train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1,yahoo=True)
+            test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1,yahoo=True)
+            read_path = './data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal)
+            
+
         else:
-          train_data = od.load_signal(params.signal +'-train')
-          test_data = od.load_signal(params.signal +'-test')
+            train_data = od.load_signal(params.signal +'-train')
+            test_data = od.load_signal(params.signal +'-test')
 
-          train_dataset = SignalDataset(path='./data/{}-train.csv'.format(params.signal),interval=21600)
-          test_dataset = SignalDataset(path='./data/{}-test.csv'.format(params.signal),interval=21600,test=True)
-          demo=False
+            train_dataset = SignalDataset(path='./data/{}-train.csv'.format(params.signal),interval=params.interval)
+            test_dataset = SignalDataset(path='./data/{}-test.csv'.format(params.signal),interval=params.interval,test=True)
+            read_path='./data/{}-test.csv'.format(params.signal)
+
     batch_size = params.batch_size
     train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True,shuffle=True,num_workers=6)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, drop_last=False, shuffle=False,num_workers=6)
@@ -392,21 +433,25 @@ if __name__ == "__main__":
       optim_cx = optim.Adam(critic_x.parameters(), lr=lr, betas=(0.9, 0.999))
 
       if params.hyperbolic:
-        # optim_enc = geoopt.optim.RiemannianAdam(decoder.parameters(), lr=lr, weight_decay=1e-5, stabilize=10)
+        optim_enc = geoopt.optim.RiemannianAdam(encoder.parameters(), lr=lr_hyper, weight_decay=1e-5, stabilize=10)
         optim_dec = geoopt.optim.RiemannianAdam(decoder.parameters(), lr=lr_hyper, weight_decay=1e-5, stabilize=10)
+        # scheduler = optim.lr_scheduler.StepLR(optim_dec, step_size=7, gamma=0.1)
+
         # optim_cx = geoopt.optim.RiemannianAdam(critic_x.parameters(), lr=lr, weight_decay=1e-5, stabilize=10)
         # optim_cz = geoopt.optim.RiemannianAdam(critic_z.parameters(), lr=lr, weight_decay=1e-5, stabilize=10)
       else: 
+        # model_params = list(encoder.parameters()) + list(decoder.parameters())
         optim_enc = optim.Adam(encoder.parameters(), lr=lr, betas=(0.9, 0.999))
         optim_dec = optim.Adam(decoder.parameters(), lr=lr, betas=(0.9, 0.999))
+
         optim_cx = optim.Adam(critic_x.parameters(), lr=lr, betas=(0.9, 0.999))
       optim_cz = optim.Adam(critic_z.parameters(), lr=lr, betas=(0.9, 0.999))
       err_loss = torch.nn.MSELoss()
 
       train_tadgan(encoder, decoder, critic_x, critic_z, n_epochs=params.epochs, params = params)
 
-      if params.hyperbolic: PATH = './models/'+ params.signal
-      else: PATH = './models_eucl/'+ params.signal
+      if params.hyperbolic: PATH = './models_{}_{}_{}/'.format(params.dataset,str(params.epochs),str(params.lr))+ params.signal
+      else: PATH = './models_eucl_{}_{}_{}/'.format(params.dataset,str(params.epochs),str(params.lr))+ params.signal
       if not os.path.isdir(PATH):
         os.makedirs(PATH)
 
@@ -415,14 +460,14 @@ if __name__ == "__main__":
       torch.save(critic_x, PATH+'/critic_x.pt')
       torch.save(critic_z, PATH+'/critic_z.pt')
 
-      if params.dataset not in  ['CASAS','new_CASAS']  :
+      if params.dataset in  ['CASAS','new_CASAS']  :
+          known_anomalies=[]
+      elif params.dataset in ['A1','A2','A3','A4']:
+          known_anomalies = pd.read_csv(read_path[:-4]+'_known_anomalies.csv')
+      else: 
           known_anomalies = od.load_anomalies(params.signal)
-      else: known_anomalies=[]
 
-      if demo:
-        anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=path.format(params.signal), signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, params=params)
-      else:
-        anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='./data/{}-test.csv'.format(params.signal),signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)
+      anomaly_detection.test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=read_path, signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)
       
 
     

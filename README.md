@@ -31,6 +31,6 @@ python main.py --dataset 'new_CASAS' --signal 'fall' --epochs=10 --model 'tadgan
 #### Once trained, you can run the only **Detector**
 add the flag --hyperbolic if you want to use the hyperspace train
 ```
-python anomaly_detection.py --dataset 'new_CASAS' --signal 'fall' --model 'tadgan'
+python anomaly_detection.py --dataset 'new_CASAS' --signal 'fall' --model 'tadgan' --signal_shape=150
 ```
 list of signals: [fall, weakness, nocturia. moretimeinchair, slowerwalking]

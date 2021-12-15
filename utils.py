@@ -25,24 +25,17 @@ def parse_args():
     parser.add_argument('--model'       , default='lstm',      help='model: lstm / tadgan')
     parser.add_argument('--hyperbolic'       , action='store_true', help='use hyperbolic space')
     parser.add_argument('--signal_shape', default=100, type=int,help ='shape of the window')
-    parser.add_argument('--interval', default=3600, type=int,help ='range of interval that tadgan has to consider')
     parser.add_argument('--user_id', default=-1, type=int,help ='user_id that tadgan has to consider [fitbit dataset only]')
     parser.add_argument('--lr', default=0.005, type=float,help ='learning rate')
     parser.add_argument('--split', default=1, type=int,help ='which split to use for train/test of the CASAS dataset')
     parser.add_argument('--batch_size', default=64, type=int,help ='number of samples per batch')
-
-    # parser.add_argument('--method'      , default='baseline',   help='baseline/baseline++/protonet/matchingnet/relationnet{_softmax}/maml{_approx}') #relationnet_softmax replace L2 norm with softmax to expedite training, maml_approx use first-order approximation in the gradient for efficiency
-    # parser.add_argument('--train_n_way' , default=5, type=int,  help='class num to classify for training') #baseline and baseline++ would ignore this parameter
-    # parser.add_argument('--test_n_way'  , default=5, type=int,  help='class num to classify for testing (validation) ') #baseline and baseline++ only use this parameter in finetuning
-    # parser.add_argument('--n_shot'      , default=1, type=int,  help='number of labeled data in each class, same as n_support') #baseline and baseline++ only use this parameter in finetuning
-    # parser.add_argument('--train_aug'   , action='store_true',  help='perform data augmentation or not during training ') #still required for save_features.py and test.py to find the model path correctly
-    # parser.add_argument('--exp_name', default='default')
-    # parser.add_argument('--qsimnet'   , action='store_true',  help='add qsimNet layers at the top of the model')
-    # parser.add_argument('--qsse'   , action='store_true',  help='add QSSE layers in the backbone model')
-    # parser.add_argument('--save_iter', default=-1, type=int,help ='saved feature from the model trained in x epoch, use the best model if x is -1')
-    # parser.add_argument('--rotate'   , action='store_true',  help='add rotate augmentation as proposed in s2m2r')
-    # parser.add_argument('--feat_size', default=256, type=int,help ='saved feature from the model trained in x epoch, use the best model if x is -1')
-
+    parser.add_argument('--verbose', action='store_true',help ='print all the information')
+    parser.add_argument('--save_result', action='store_true',      help='save the output of confusion matrix at filename')
+    parser.add_argument('--filename'       , default='',      help='name of the file with results')
+    parser.add_argument('--rec_error'       , default='dtw',      help='name of the file with results')
+    parser.add_argument('--addition_type'       , default='mult',      help='name of the file with results')
+    parser.add_argument('--interval'       , default=21600, type=int,     help='used in the preprocessing phase')
+    parser.add_argument('--unique_dataset', action='store_true',      help='if train and test are different')
 
     return parser.parse_args()
 
@@ -176,6 +169,7 @@ def plot(dfs, anomalies=[], signal = 'NYC Taxi Demand', path=''):
     # format yticks
     # ylabels = ['{:,.0f}'.format(x) + 'K' for x in ax.get_yticks()/1000]
     # ax.set_yticklabels(ylabels)
+    print(path+'anomalies.jpg')
     fig.savefig(path+'anomalies.jpg')
     plt.show()
     

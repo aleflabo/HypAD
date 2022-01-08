@@ -35,11 +35,11 @@ python main.py --dataset 'new_CASAS' --signal 'fall' --epochs=30 --lr=0.0005 --s
 ```
 HypAD:
 ```
-python main.py --dataset 'new_CASAS' --signal 'fall' --epochs=30 --lr=0.0005 --signal_shape=150
+python main.py --dataset 'new_CASAS' --signal 'fall' --epochs=30 --lr=0.0005 --signal_shape=150 --hyperbolic
 ```
 
 #### Once trained, you can run the only **Detector**
-add the flag --hyperbolic if you want to use the hyperspace train
+add the flag --hyperbolic if you want to use the HypAD train
 ```
 python anomaly_detection.py --dataset 'new_CASAS' --signal 'fall' --signal_shape=150
 ```

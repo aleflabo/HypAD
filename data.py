@@ -85,6 +85,7 @@ def download(name, test_size=None, data_path=DATA_PATH):
 
         LOGGER.info('Downloading CSV %s from %s', name, url)
         os.makedirs(data_path, exist_ok=True)
+        print(url)
         data = pd.read_csv(url)
         data.to_csv(filename, index=False)
 

@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--model'       , default='lstm',      help='model: lstm / tadgan')
     parser.add_argument('--hyperbolic'       , action='store_true', help='use hyperbolic space')
     parser.add_argument('--signal_shape', default=100, type=int,help ='shape of the window')
-    parser.add_argument('--user_id', default=-1, type=int,help ='user_id that tadgan has to consider [fitbit dataset only]')
+    parser.add_argument('--id', default=1, type=int,help ='id that tadgan has to consider [Dario\'s dataset only]')
     parser.add_argument('--lr', default=0.005, type=float,help ='learning rate')
     parser.add_argument('--split', default=1, type=int,help ='which split to use for train/test of the CASAS dataset')
     parser.add_argument('--batch_size', default=64, type=int,help ='number of samples per batch')
@@ -33,9 +33,13 @@ def parse_args():
     parser.add_argument('--save_result', action='store_true',      help='save the output of confusion matrix at filename')
     parser.add_argument('--filename'       , default='',      help='name of the file with results')
     parser.add_argument('--rec_error'       , default='dtw',      help='name of the file with results')
-    parser.add_argument('--addition_type'       , default='mult',      help='name of the file with results')
+    parser.add_argument('--combination'       , default='mult',      help='name of the file with results')
     parser.add_argument('--interval'       , default=21600, type=int,     help='used in the preprocessing phase')
     parser.add_argument('--unique_dataset', action='store_true',      help='if train and test are different')
+    parser.add_argument('--resume', action='store_true',help ='true if you want to resume model')
+    parser.add_argument('--resume_epoch', default=10, type=int,help ='epoch you want to resume')
+    parser.add_argument('--load', action='store_true',help ='enable load saved pickles')
+    parser.add_argument('--new_features', action='store_true',help ='ony for the Dario\'s datasets')
 
     return parser.parse_args()
 
@@ -212,26 +216,3 @@ def plot_rws(X, window=100, k=5, lim=1000):
     plt.tight_layout()
     plt.show()
 
-def get_assigned_file(checkpoint_dir,num):
-    assign_file = os.path.join(checkpoint_dir, '{:d}.pth'.format(num))
-    return assign_file
-
-def get_resume_file(checkpoint_dir):
-    filelist = glob.glob(os.path.join(checkpoint_dir, '*.pth'))
-    if len(filelist) == 0:
-        return None
-
-    filelist =  [ x  for x in filelist if os.path.basename(x) != 'best_model.pth' ]
-    epochs = np.array([int(os.path.splitext(os.path.basename(x))[0]) for x in filelist])
-    max_epoch = np.max(epochs)
-    resume_file = os.path.join(checkpoint_dir, '{:d}.pth'.format(max_epoch))
-    return resume_file
-
-def get_best_file(checkpoint_dir):
-    best_file = os.path.join(checkpoint_dir, 'best_model.pth')
-    #best_file = os.path.join(checkpoint_dir, str(save_iter)+'.pth')
-
-    if os.path.isfile(best_file):
-        return best_file
-    else:
-        return get_resume_file(checkpoint_dir)

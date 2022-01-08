@@ -9,6 +9,7 @@ from dateutil.rrule import rrule, DAILY,SECONDLY
 import os 
 from scipy import signal as scipy_signal
 
+
 def save_known_anomalies(df,path):
       # if not os.path.exists(path[:-4]+'_known_anomalies.csv'):
       try:  
@@ -48,7 +49,7 @@ def yahoo_preprocess(df):
 
       df = df[['timestamp','value']]
       return df
-      
+
 class SignalDataset(Dataset):
     def __init__(self, path, interval=21600, windows_size=100, test=False, yahoo=None):
         self.signal_df = pd.read_csv(path)
@@ -202,6 +203,5 @@ class SignalDataset(Dataset):
           return x, self.index, self.y, self.y_index, self.X_index
         return x
 
-        # return {'value':x, 'anomaly':row['anomaly']}
 
 

@@ -9,22 +9,19 @@ from scipy.optimize import fmin
 from utils import plot, plot_ts, plot_rws, plot_error, unroll_ts
 import matplotlib.pyplot as plt
 import data as od
-import pandas as pd 
 from utils import parse_args
-from dataloader import SignalDataset
+from dataloader import SignalDataset, yahoo_preprocess, _detrend_signal
 from torch.utils.data import Dataset, DataLoader
 import model
 from datetime import datetime
 import geoopt.manifolds.stereographic.math as gmath
-from numba import jit
 from dataloader_multivariate import CasasDataset
-from datetime import datetime
 from dateutil.rrule import rrule, DAILY,SECONDLY
 import os
-from dataloader import yahoo_preprocess, _detrend_signal
+import warnings
+warnings.filterwarnings("ignore")
 
 def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='', signal = '', hyperbolic = False, path='', signal_shape=100, params=''):
-    # path = './data'
 
     recons_signal=[]
     true_signal=[]
@@ -34,97 +31,91 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
     hyper_real = []
     eucl_recons = []
     path+='/'
-
+    
     decoder.eval()
     encoder.eval()
     critic_x.eval()
     rec_error_type=params.rec_error
-    combination=params.addition_type
-    for batch, (sample,index,y,y_index,x_index) in enumerate(test_loader):
-      if encoder.hyperbolic:
-        x, hyper_z = encoder(sample.float().cuda())
-        hyper_recons_z.append(torch.squeeze(hyper_z).cpu().detach().numpy())
-      else: x = encoder(sample.float().cuda())
-      
-      if decoder.hyperbolic:
-        hyper, eucl = decoder(x)
-        hyper_x = decoder.hyperbolic_linear(sample.view(-1,signal_shape).float().cuda())
+    combination=params.combination
+    if params.load and (os.path.exists(path+'critic_score.pt')) and (os.path.exists(path+'recons_signal.pt')):
+          recons_signal = torch.load(path+'recons_signal.pt')
+          true_signal = torch.load(path+'gt_signal.pt')
+          critic_score = torch.load(path+'critic_score.pt')
+          true_index = torch.load(path+'true_index.pt')
+    else: 
+        for batch, (sample,index,y,y_index,x_index) in enumerate(test_loader):
+          if encoder.hyperbolic:
+            x, hyper_z = encoder(sample.float().cuda())
+            hyper_recons_z.append(torch.squeeze(hyper_z).cpu().detach().numpy())
+          else: x = encoder(sample.float().cuda())
+          
+          if decoder.hyperbolic:
+            hyper, eucl = decoder(x)
+            hyper_x = decoder.hyperbolic_linear(sample.view(-1,signal_shape).float().cuda())
+            
+            if sample.shape[0] == 1:
+              recons_signal.append(torch.squeeze(hyper).cpu().detach().numpy().reshape(1,-1))
+              eucl_recons.append(torch.squeeze(eucl).cpu().detach().numpy().reshape(1,-1))
+              hyper_real.append(torch.squeeze(hyper_x).cpu().detach().numpy().reshape(1,-1))
+              critic_score.extend(critic_x(sample.cuda()).cpu().detach().numpy().reshape(-1))
+            else: 
+              recons_signal.append(torch.squeeze(hyper).cpu().detach().numpy())
+              eucl_recons.append(torch.squeeze(eucl).cpu().detach().numpy())
+              hyper_real.append(torch.squeeze(hyper_x).cpu().detach().numpy())
+              critic_score.extend(torch.squeeze(critic_x(sample.cuda())).cpu().detach().numpy())
+          else: 
+            reconstructed_signal = decoder(x)
+            if sample.shape[0] == 1:
+              recons_signal.append(reconstructed_signal.cpu().detach().numpy().reshape(1,-1))
+              critic_score.extend(critic_x(sample.cuda()).cpu().detach().numpy().reshape(-1))
+            else:
+              recons_signal.append(torch.squeeze(reconstructed_signal).cpu().detach().numpy())
+              critic_score.extend(torch.squeeze(critic_x(sample.cuda())).cpu().detach().numpy())
 
-        # recons_signal.append(torch.squeeze(hyper).cpu().detach().numpy())
-        # eucl_recons.append(torch.squeeze(eucl).cpu().detach().numpy())
-        # hyper_real.append(torch.squeeze(hyper_x).cpu().detach().numpy())
-        
-        if sample.shape[0] == 1:
-          recons_signal.append(torch.squeeze(hyper).cpu().detach().numpy().reshape(1,100))
-          eucl_recons.append(torch.squeeze(eucl).cpu().detach().numpy().reshape(1,100))
-          hyper_real.append(torch.squeeze(hyper_x).cpu().detach().numpy().reshape(1,100))
-          critic_score.extend(critic_x(sample.cuda()).cpu().detach().numpy().reshape(-1))
-        else: 
-          recons_signal.append(torch.squeeze(hyper).cpu().detach().numpy())
-          eucl_recons.append(torch.squeeze(eucl).cpu().detach().numpy())
-          hyper_real.append(torch.squeeze(hyper_x).cpu().detach().numpy())
-          critic_score.extend(torch.squeeze(critic_x(sample.cuda())).cpu().detach().numpy())
-      else: 
-        reconstructed_signal = decoder(x)
-        if sample.shape[0] == 1:
-          recons_signal.append(reconstructed_signal.cpu().detach().numpy().reshape(1,100))
-          critic_score.extend(critic_x(sample.cuda()).cpu().detach().numpy().reshape(-1))
-        else:
-          recons_signal.append(torch.squeeze(reconstructed_signal).cpu().detach().numpy())
-          critic_score.extend(torch.squeeze(critic_x(sample.cuda())).cpu().detach().numpy())
+          true_signal.append(sample.numpy())
+            
 
-      true_signal.append(sample.numpy())
-        
+        recons_signal = np.concatenate(recons_signal)
+        gt_signal = np.concatenate(true_signal)
+        torch.save(recons_signal, path+'recons_signal.pt')
+        torch.save(gt_signal, path+'gt_signal.pt')
+        true_signal = np.concatenate(true_signal)
+        torch.save(critic_score, path+'critic_score.pt')
+        try:
+          torch.save(index[0], path+'true_index.pt')
+        except:pass
 
-      # else:
-      #   print(sample.shape[0])
-    # if len(recons_signal[-1].shape) == 1:
-    #   if decoder.hyperbolic:
-    #     eucl_recons = np.append(np.concatenate(eucl_recons[:-1]),eucl_recons[-1].reshape(1,-1),axis=0)
-    #     recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
-    #     hyper_real = np.append(np.concatenate(hyper_real[:-1]),hyper_real[-1].reshape(1,-1),axis=0)
-    #   else:
-    #     recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
-    #     # critic_score = np.append(np.concatenate(critic_score[:-1]),critic_score[-1].reshape(1,-1),axis=0)
-    #   if encoder.hyperbolic:
-    #     hyper_recons_z = np.append(np.concatenate(hyper_recons_z[:-1]),hyper_recons_z[-1].reshape(1,-1),axis=0)
+        if decoder.hyperbolic:
+          true_signal = np.concatenate(hyper_real)
+          eucl_recons = np.concatenate(eucl_recons)
+          torch.save(critic_score, path+'critic_score.pt')
+          torch.save(eucl_recons, path+'eucl_recons.pt')
+          torch.save(recons_signal, path+'recons_hyper.pt')
+          torch.save(true_signal, path+'real_hyper.pt')
+        if encoder.hyperbolic:
+          hyper_recons_z = np.concatenate(hyper_recons_z)
+          torch.save(hyper_recons, path+'hyper_recons_z.pt')
+        if not params.dataset in ['new_CASAS','CASAS','ELINUS','eHealth']:
+            x_index = index[0]
+            true_index = x_index
 
-    # else:
-    recons_signal = np.concatenate(recons_signal)
-    gt_signal = np.concatenate(true_signal)
-    torch.save(recons_signal, path+'recons_signal.pt')
-    torch.save(gt_signal, path+'gt_signal.pt')
-    true_signal = np.concatenate(true_signal)
-    torch.save(critic_score, path+'critic_score.pt')
-    try:
-      torch.save(index[0], path+'true_index.pt')
-    except:pass
-    if decoder.hyperbolic:
-      true_signal = np.concatenate(hyper_real)
-      eucl_recons = np.concatenate(eucl_recons)
-      torch.save(critic_score, path+'critic_score.pt')
-      torch.save(eucl_recons, path+'eucl_recons.pt')
-      torch.save(recons_signal, path+'recons_hyper.pt')
-      torch.save(true_signal, path+'real_hyper.pt')
-    if encoder.hyperbolic:
-      hyper_recons_z = np.concatenate(hyper_recons_z)
-      torch.save(hyper_recons, path+'hyper_recons_z.pt')
-
-    if params.dataset == 'new_CASAS':
+    if params.dataset in ['new_CASAS','CASAS','ELINUS','eHealth']:
         #just creating some random datetime index for the plots
         random_index = list(rrule(SECONDLY, dtstart=datetime(2012, 11, 24), until=datetime(2012,11,30)))[:recons_signal.shape[0]]
         x_index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
+        index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
         torch.save(x_index, path+'x_index.pt')
 
-        y=y[0]
-        y=torch.load('./data/CASAS/new_dataset/{}/y_test'.format(params.signal))
+        if params.dataset=='new_CASAS':
+            y=torch.load('./data/CASAS/new_dataset/{}/y_test'.format(params.signal))
+        else:
+            y=torch.load("./data/DATASETS/{}/POINTS/{}/{}_groundtruth_id{}.pt".format(params.dataset, params.signal, params.signal, params.id))
         y = y.reshape(y.shape[0]*y.shape[1], -1)[:x_index.shape[0]]
-        if not params.hyperbolic:
-          step_size = 1
-          smooth=True
-          score_window=10
-          smoothing_window = math.trunc(recons_signal.shape[0] * 0.01)
 
+        if not params.hyperbolic:
+          '''
+          recons_error
+          '''
           rec_scores = np.linalg.norm(true_signal-recons_signal,axis=1)
           # rec_scores = pd.Series(rec_scores).rolling(
           #     smoothing_window, center=True, min_periods=smoothing_window // 2).mean().values
@@ -132,88 +123,100 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
           rec_scores = stats.zscore(rec_scores)
           rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
 
-          critic_smooth_window = math.trunc(true_signal.shape[0] * 0.01)
+          critic_scores=[]
 
-          critic_extended = list()
-          for c in critic_score:
-              critic_extended.extend(np.repeat(c, true_signal.shape[1]).tolist())
-          critic_extended = np.asarray(critic_extended).reshape((-1, true_signal.shape[1]))
-
-          critic_kde_max = []
-          pred_length = true_signal.shape[1]
-          num_errors = true_signal.shape[1] + step_size * (true_signal.shape[0] - 1)
-
-          for i in range(num_errors):
-              critic_intermediate = []
-
-              for j in range(max(0, i - num_errors + pred_length), min(i + 1, pred_length)):
-                  critic_intermediate.append(critic_extended[i - j, j])
-
-              if len(critic_intermediate) > 1:
-                  discr_intermediate = np.asarray(critic_intermediate)
-                  try:
-                  
-                      critic_kde_max.append(discr_intermediate[np.argmax(
-                          stats.gaussian_kde(discr_intermediate)(critic_intermediate))])
-                  except np.linalg.LinAlgError:
-                      critic_kde_max.append(np.median(discr_intermediate))
+          '''
+          critic_score
+          '''
+          if combination in ['mult','uncertainty','sum','sum_uncertainty','critic','critic_uncertainty']:
+              
+              if params.load and os.path.exists(path+'critic_scores.pickle'):
+                  with open(path+'critic_scores.pickle', 'rb') as handle:
+                      critic_scores = pickle.load(handle)
               else:
-                  critic_kde_max.append(np.median(np.asarray(critic_intermediate)))
+                  critic_scores = final_critic_scores(critic_score,true_signal)
+                  with open(path+'critic_scores.pickle', 'wb') as handle:
+                      pickle.dump(critic_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+              critic_scores = critic_scores[:rec_scores.shape[0]]
 
-          # Compute critic scores
-          critic_scores = _compute_critic_score(critic_kde_max, critic_smooth_window)
 
-          error = rec_scores*critic_scores[:rec_scores.shape[0]]
+          torch.save(critic_scores[:rec_scores.shape[0]],path+'critic_scores.pt')
+          torch.save(rec_scores,path+'rec_scores.pt')
+          
+          final_scores = combine_scores(combination,critic_scores,rec_scores,recons_signal)
 
-          intervals = find_anomalies(error[:recons_signal.shape[0]].reshape(-1), true_index, 
-                                window_size_portion=0.33, 
-                                window_size=1410,
-                                window_step_size_portion=None, 
-                                fixed_threshold=True,
-                                anomaly_padding=50)
+
         else:
+          '''
+          hyper recons error
+          '''
           true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
           pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
           sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
           squnorm = torch.sum(pred_data ** 2, dim=-1)
           sqvnorm = torch.sum(true_data ** 2, dim=-1)
           x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
-          dist = torch.acosh(x_temp)
-          
+          rec_scores = torch.acosh(x_temp)
+          rec_scores = stats.zscore(rec_scores)
+          rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
+
+          critic_scores=[]
+          '''
+          combination of rec_error, critic_score, uncertainty
+          '''
+          if combination in ['mult','uncertainty','sum','sum_uncertainty','critic','critic_uncertainty']:
+
+              if params.load and os.path.exists(path+'critic_scores.pickle'):
+                  with open(path+'critic_scores.pickle', 'rb') as handle:
+                      critic_scores = pickle.load(handle)
+              else:
+                  critic_scores = final_critic_scores(critic_score,true_signal)
+                  with open(path+'critic_scores.pickle', 'wb') as handle:
+                      pickle.dump(critic_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+              critic_scores = critic_scores[:rec_scores.shape[0]]
+
+
+          final_scores = combine_scores(combination,critic_scores,rec_scores,recons_signal)
+
           torch.save(x_index, path+'true_index.pt')
-          #using poincarè distances between gt and preds as errors
-          intervals = find_anomalies(dist, x_index, 
-                                window_size_portion=0.2, 
-                                window_size=1410,
-                                window_step_size_portion=None, 
-                                fixed_threshold=True,
-                                anomaly_padding=200)
+
+        # intervals = find_anomalies(final_scores, x_index, 
+        #                       window_size_portion=0.2, 
+        #                       window_size=1410,
+        #                       window_step_size_portion=None, 
+        #                       fixed_threshold=True,
+        #                       anomaly_padding=200)
+        intervals = find_anomalies(final_scores, x_index, 
+                              window_size_portion=0.2, 
+                              window_step_size_portion=0.1, 
+                              fixed_threshold=True,
+                              anomaly_padding=200)
 
         pred_anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
-        print(pred_anomalies[['start','end']])
+        # print(pred_anomalies[['start','end']])
         pred_anomalies.to_csv(path+'pred_anomalies.csv')
         known_anomalies = casas_anomalies(y,x_index)
         anomalies = [pred_anomalies , known_anomalies]
-        colors = ['red'] + ['green'] * (len(anomalies) - 1)
-        plt.rcParams["figure.figsize"] = (50,10)
-        fig = plt.figure()
+        # colors = ['red'] + ['green'] * (len(anomalies) - 1)
+        # plt.rcParams["figure.figsize"] = (50,10)
+        # fig = plt.figure()
 
-        for i, anomaly in enumerate(anomalies):
-          anomaly = list(anomaly[['start', 'end']].itertuples(index=False))
+        # for i, anomaly in enumerate(anomalies):
+        #   anomaly = list(anomaly[['start', 'end']].itertuples(index=False))
 
-          for _, anom in enumerate(anomaly):
-              t1 = convert_date_single(anom[0])
-              t2 = convert_date_single(anom[1])
-              plt.axvspan(t1, t2, color=colors[i], alpha=0.2)
-              plt.plot(list(map(lambda x: convert_date_single(x), x_index[:len(y)] )), y)
+        #   for _, anom in enumerate(anomaly):
+        #       t1 = convert_date_single(anom[0])
+        #       t2 = convert_date_single(anom[1])
+        #       plt.axvspan(t1, t2, color=colors[i], alpha=0.2)
+        #       plt.plot(list(map(lambda x: convert_date_single(x), x_index[:len(y)] )), y)
         # plt.show()
-        fig.savefig(path+'anomalies.png', dpi=fig.dpi)
-        print('The plot with the anomalies is visible at {}'.format(path))
+        # fig.savefig(path+'anomalies.png', dpi=fig.dpi)
+        # print('The plot with the anomalies is visible at {}'.format(path))
 
         tn, fp, fn, tp = contextual_confusion_matrix(known_anomalies, pred_anomalies, weighted=False )
         precision = tp/(tp+fp)
         recall = tp/(tp+fn)
-        print('precision: {}, recall: {}'.format(precision, recall))
+        # print('precision: {}, recall: {}'.format(precision, recall))
 
         F1 = 2 * (precision * recall) / (precision + recall)
         gmean = np.sqrt(precision*recall)
@@ -226,47 +229,43 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
         else: 
           df = pd.read_csv(read_path)
 
-        x_index = index[0]
-        true_index = x_index
-
         if not params.hyperbolic:
-          error, true_index, true, pred = score_anomalies(true_signal, 
+          final_scores, true_index, true, pred = score_anomalies(true_signal, 
                                                           recons_signal, 
                                                           critic_score, 
-                                                          x_index, 
+                                                          true_index, 
                                                           rec_error_type=rec_error_type, 
-                                                          comb=combination)
-          torch.save(x_index, path+'true_index.pt')
+                                                          comb=combination,
+                                                          path=path)
+          # torch.save(true_index, path+'true_index.pt')
 
         else:
-          # true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
-          # pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
-          # sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
-          # squnorm = torch.sum(pred_data ** 2, dim=-1)
-          # sqvnorm = torch.sum(true_data ** 2, dim=-1)
-          # x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
-          # error = torch.acosh(x_temp)
+          true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
+          pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
+          sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
+          squnorm = torch.sum(pred_data ** 2, dim=-1)
+          sqvnorm = torch.sum(true_data ** 2, dim=-1)
+          x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
+          rec_scores = torch.acosh(x_temp)
+          
+          critic_scores = []
+          '''
+          combination of rec_error, critic_score, uncertainty
+          '''
+          if combination in ['mult','uncertainty','sum','sum_uncertainty','critic','critic_uncertainty']:
 
-          # smoothing_window = math.trunc(true_signal.shape[0] * 0.01)
-          # error = pd.Series(error).rolling(
-          #         smoothing_window, center=True, min_periods=smoothing_window // 2).mean().values
+              if params.load and os.path.exists(path+'critic_scores.pickle'):
+                  with open(path+'critic_scores.pickle', 'rb') as handle:
+                      critic_scores = pickle.load(handle)
+              else:
+                  critic_scores = final_critic_scores(critic_score,true_signal)
+                  with open(path+'critic_scores.pickle', 'wb') as handle:
+                      pickle.dump(critic_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+              critic_scores = critic_scores[:rec_scores.shape[0]]
 
-          #using poincarè distances between gt and preds as errors
-          torch.save(x_index, path+'true_index.pt')
-          # critic_smooth_window = math.trunc(recons_signal.shape[0] * 0.01)
-          # critic_scores = _compute_critic_score(critic_score, critic_smooth_window)
-          # error=error*critic_scores
-          # recons_eucl = gmath.logmap0(torch.Tensor(eucl_recons), k=torch.tensor(-1.), dim=1).float()
-          # real_eucl = gmath.logmap0(torch.Tensor(gt_signal), k=torch.tensor(-1.), dim=1).float()
+          final_scores = combine_scores(combination,critic_scores,rec_scores,recons_signal)
 
-          error, true_index, true, pred = score_anomalies(np.expand_dims(gt_signal,2), 
-                                                          np.expand_dims(eucl_recons,2), 
-                                                          critic_score, 
-                                                          x_index, 
-                                                          rec_error_type=rec_error_type, 
-                                                          comb=combination)
-
-        intervals = find_anomalies(error.reshape(-1), true_index, 
+        intervals = find_anomalies(final_scores.reshape(-1), true_index, 
                                   window_size_portion=0.33, 
                                   window_step_size_portion=0.1, 
                                   fixed_threshold=True)
@@ -274,9 +273,7 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
         try:
             anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
             anomalies.to_csv(path+'anomalies.csv')
-
-            plot(df, [anomalies, known_anomalies], signal, path)        
-            print(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
+            # print(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
             out=list(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
 
             tn, fp, fn, tp = contextual_confusion_matrix(known_anomalies, anomalies, weighted=False)
@@ -285,13 +282,11 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
 
             F1 = 2 * (precision * recall) / (precision + recall)
 
-        except:
- 
-            # plot(df, [known_anomalies], signal, path)   
+        except Exception as e:
             out = [0,0,0,0]
             F1=0
         
-        print('f1_score: {}'.format(F1))
+        # print('f1_score: {}'.format(F1))
 
         if params.save_result:
           file_place = './results/{}'.format(params.filename)
@@ -299,74 +294,20 @@ def test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomali
           if os.path.isfile(file_place):
             res = pd.read_csv(file_place) 
           else:
-            res = pd.DataFrame(columns=['signal','fn','fp','tn','tp'])
+            res = pd.DataFrame(columns=['signal','tn','fp','fn','tp'])
+            
+          if not params.signal in list(res['signal']):
+              out=[signal]+out
+              res.loc[len(res)] = out
+              res.to_csv(file_place, index=False)
 
-          out=[signal]+out
-          res.loc[len(res)] = out
-          res.to_csv(file_place, index=False)
-
-
-def test_lstm(test_loader, model, known_anomalies, path, signal = ''):
-    df = pd.read_csv(path)
-    # plot(df, known_anomalies,signal)
-    recons_signal=[]
-    true_signal=[]
-
-    model = model.eval()
-    for batch, (sample,index,y,y_index,x_index) in enumerate(test_loader):
-        reconstructed_signal = model(sample.cuda().float())
-        true_signal.append(sample.numpy())
-        recons_signal.append(torch.squeeze(reconstructed_signal).cpu().detach().numpy())
-
-    if len(recons_signal[-1].shape) == 1:
-      recons_signal = np.append(np.concatenate(recons_signal[:-1]),recons_signal[-1].reshape(1,-1),axis=0)
-    else:
-      recons_signal = np.concatenate(recons_signal)
-
-    true_signal = np.concatenate(true_signal)
-    index = index[0] #[(index[0].shape[0]-y_index[0].shape[0]):]
-    y=y[0]
-    y_index = y_index[0]
-    y_hat = unroll_ts(recons_signal)
-    x_index = x_index[0]
-    # pair-wise error calculation
-    error = np.zeros(shape=y.shape)
-    length = y.shape[0]
-    for i in range(length):
-        error[i] = abs(y_hat[i] - y[i])
-
-    # visualize the error curve
-    fig = plt.figure(figsize=(30, 3))
-    plt.plot(error)
-    fig.savefig('error.jpg')
-    plt.show()
-
-    errors, preds = reconstruction_errors(y.reshape(-1,1),y_hat.reshape(-1,1),rec_error_type="point")
-    # # visualize the error curve
-    # plot_error([[true, pred], error])
-    # find anomalies
-    print(errors)
-    errors = stats.zscore(errors)
-    errors = np.clip(errors, a_min=0, a_max=None) + 1
-    print(errors)
-    intervals = find_anomalies(error.reshape(-1), index.numpy(), 
-                              window_size_portion=0.33, 
-                              window_step_size_portion=0.1, 
-                              fixed_threshold=True)
-    # visualize the result
-    anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
-    print(anomalies[['start','end']])
-    print(known_anomalies)
-    print(contextual_confusion_matrix(known_anomalies, anomalies, data=df, weighted=False))
-    # find_scores(y_true, y_predict)
-    plot(df, [anomalies, known_anomalies], signal)        
 
 
 def casas_anomalies(y,x_index):
     # just loading casas anomalies in the correct format
     gt_anomal = []
     actual = None
-    print(y.shape)
+
     y = y.reshape(y.shape[0]*y.shape[1], -1)[:x_index.shape[0]]
     for i in range(len(y.reshape(-1)==1)):
       if y[i]==1:
@@ -415,9 +356,74 @@ def _compute_critic_score(critics, smooth_window):
 
     return z_scores
 
+def combine_scores(combination,critic_scores=[],rec_scores=[],recons_signal=[]):
+        
+    if combination=='sum':
+        final_scores = 0.2*critic_scores + 0.8*rec_scores
+    elif combination=='mult':
+        final_scores = np.multiply(critic_scores, rec_scores)
+    elif combination=='uncertainty':
+        uncertainty_scores = np.linalg.norm(recons_signal,axis=1)
+        final_scores = np.multiply(critic_scores, rec_scores) * uncertainty_scores
+    elif combination=='critic':
+        final_scores = critic_scores
+    elif combination=='critic_uncertainty':
+        uncertainty_scores = np.linalg.norm(recons_signal,axis=1)
+        # uncertainty_scores = np.concatenate([np.repeat(uncertainty_scores[0],99),uncertainty_scores])
+        final_scores = critic_scores*uncertainty_scores
+    elif combination=='sum_uncertainty':
+        uncertainty_scores = np.linalg.norm(recons_signal,axis=1)
+        final_scores = 0.5*critic_scores*uncertainty_scores[:rec_scores.shape[0]] + 0.5*rec_scores*uncertainty_scores[:rec_scores.shape[0]]
+    elif combination=='rec':
+        final_scores = rec_scores
+    elif combination=='rec_uncertainty':
+        uncertainty_scores = np.linalg.norm(recons_signal,axis=1)
+        final_scores = rec_scores*uncertainty_scores
+
+    return final_scores
+
+
+def final_critic_scores(critic_score,true_signal):
+      step_size = 1
+      smooth=True
+      score_window=10
+      smoothing_window = math.trunc(true_signal.shape[0] * 0.01)
+      critic_smooth_window = math.trunc(true_signal.shape[0] * 0.01)
+
+      critic_extended = list()
+      for c in critic_score:
+          critic_extended.extend(np.repeat(c, true_signal.shape[1]).tolist())
+      critic_extended = np.asarray(critic_extended).reshape((-1, true_signal.shape[1]))
+
+      critic_kde_max = []
+      pred_length = true_signal.shape[1]
+      num_errors = true_signal.shape[1] + step_size * (true_signal.shape[0] - 1)
+
+      for i in range(num_errors):
+          critic_intermediate = []
+
+          for j in range(max(0, i - num_errors + pred_length), min(i + 1, pred_length)):
+              critic_intermediate.append(critic_extended[i - j, j])
+
+          if len(critic_intermediate) > 1:
+              discr_intermediate = np.asarray(critic_intermediate)
+              try:
+              
+                  critic_kde_max.append(discr_intermediate[np.argmax(
+                      stats.gaussian_kde(discr_intermediate)(critic_intermediate))])
+              except np.linalg.LinAlgError:
+                  critic_kde_max.append(np.median(discr_intermediate))
+          else:
+              critic_kde_max.append(np.median(np.asarray(critic_intermediate)))
+
+      # Compute critic scores
+      critic_scores = _compute_critic_score(critic_kde_max, critic_smooth_window)
+      return critic_scores
+
+
 def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_window=None,
                     error_smooth_window=None, smooth=True, rec_error_type="point", comb="mult",
-                    lambda_rec=0.5,path=None):
+                    lambda_rec=0.5,path=None,samples_num='0'):
     """Compute an array of anomaly scores.
     Anomaly scores are calculated using a combination of reconstruction error and critic score.
     Args:
@@ -500,16 +506,25 @@ def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_wind
         if path:
           with open(path+'critic_scores.pickle', 'wb') as handle:
                 pickle.dump(critic_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
-          # with open(path+'rec_scores.pickle', 'wb') as handle:
-          #       pickle.dump(rec_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     else:
           with open(path+'critic_scores.pickle', 'rb') as handle:
             critic_scores = pickle.load(handle)
-          # with open(path+'rec_scores.pickle', 'rb') as handle:
-          #   rec_scores = pickle.load(handle)
-          #   predictions = []
-  
+
+    for ret in ['point','area','dtw']:
+      if path and not os.path.exists(path+ret+'.pickle'):
+
+          # Compute reconstruction scores
+          rec_scores, predictions = reconstruction_errors(
+              y, y_hat, step_size, score_window, error_smooth_window, smooth, ret)
+          
+          rec_scores = stats.zscore(rec_scores)
+          rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
+
+          if path:
+            with open(path+ret+'.pickle', 'wb') as handle:
+                  pickle.dump(rec_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
     if (not path) or (path and not os.path.exists(path+rec_error_type+'.pickle')):
 
         # Compute reconstruction scores
@@ -526,6 +541,7 @@ def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_wind
         with open(path+rec_error_type+'.pickle', 'rb') as handle:
             rec_scores = pickle.load(handle)
             predictions=[]
+            
     # Combine the two scores
     if comb == "mult":
         final_scores = np.multiply(critic_scores, rec_scores)
@@ -536,11 +552,16 @@ def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_wind
     elif comb == "rec":
         final_scores = rec_scores
 
+    elif comb == "critic":
+        final_scores = critic_scores
     else:
         raise ValueError(
             'Unknown combination specified {}, use "mult", "sum", or "rec" instead.'.format(comb))
 
     true = [[t] for t in true]
+    # with open(path+rec_error_type+'_{}.pickle'.format(samples_num), 'wb') as handle:
+    #       pickle.dump(rec_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
     return final_scores, true_index, true, predictions
 
 def _overlap_segment(expected, observed, start=None, end=None):
@@ -1411,19 +1432,18 @@ def find_scores(y_true, y_predict):
       print ('F1 Score {:.2f}'.format(0))
 
 
+
 if __name__ == "__main__":
     params = parse_args()
-    print('signal: {}'.format(params.signal))
-    signal_list = ['heartrate_seconds_merged','minuteStepsNarrow_merged','hourlyCalories_merged','minuteSleep_merged']
-    demo=False
+    # print('dataset: {}, signal: {}'.format(params.dataset, params.signal))
 
-    if params.dataset == 'CASAS':
+    ### MULTIVARIATE DATASETS
+    if params.dataset == 'CASAS_':
         path = '/content/drive/MyDrive/ASSISTED LIVING (e-linus)/Data&Experiments/DianeCookCASAS/'
         train_dataset = CasasDataset(seq_path=path+'sequences_2week_{}.pt'.format(params.signal), 
                                      gt_path=path+'ground_truth_2week_{}.pt'.format(params.signal), split=params.split)
         test_dataset = CasasDataset(seq_path=path+'sequences_2week_{}.pt'.format(params.signal), 
                                      gt_path=path+'ground_truth_2week_{}.pt'.format(params.signal), test=True)
-
 
     elif params.dataset == 'new_CASAS':
         path = './data/CASAS/new_dataset/'
@@ -1431,77 +1451,111 @@ if __name__ == "__main__":
                                      gt_path=path+params.signal, split=params.split, dataset=params.dataset)
         test_dataset = CasasDataset(seq_path=path+params.signal, 
                                      gt_path=path+params.signal, test=True, dataset=params.dataset)
+        read_path = ''
+    
+    elif params.dataset in ['CASAS','ELINUS','eHealth']:
+        if not params.new_features:
+          seq_path = "./data/DATASETS/{}/normal_sequences.pt".format(params.dataset)
+          seq_path_test = "./data/DATASETS/{}/POINTS/{}/{}_sequences_id{}.pt".format(params.dataset, params.signal, params.signal, params.id)
+          gt_path = "./data/DATASETS/{}/POINTS/{}/{}_groundtruth_id{}.pt".format(params.dataset, params.signal, params.signal,params.id)
+        else:
+          seq_path = "./data/DATASETS/{}/normal_sequences_newfeatures.pt".format(params.dataset)
+          seq_path_test = "./data/DATASETS/{}/POINTS_NEWFEATURES/{}_sequences_newfeatures.pt".format(params.dataset, params.signal, params.signal)
+          gt_path = "./data/DATASETS/{}/POINTS_NEWFEATURES/{}_groundtruth_newfeatures.pt".format(params.dataset, params.signal, params.signal)
 
+        train_dataset = CasasDataset(seq_path=seq_path, 
+                                     gt_path=gt_path, split=params.split, dataset=params.dataset)
+        test_dataset = CasasDataset(seq_path=seq_path_test, 
+                                     gt_path=gt_path, test=True, dataset=params.dataset)
+        read_path = ''
+
+
+    ### UNIVARIATE DATASETS
     else:
+        if params.unique_dataset and (params.dataset not in ['A1','A2','A3','A4']):
+            train_data = od.load_signal(params.signal)
+            test_data = od.load_signal(params.signal)
+            train_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),interval=params.interval)
+            test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=params.interval)
+            read_path='./data/{}.csv'.format(params.signal)
 
-      if params.unique_dataset:
-          train_data = od.load_signal(params.signal)
-          test_data = od.load_signal(params.signal)
+        elif params.dataset in ['A1','A2','A3','A4']:
 
-          train_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),interval=params.interval)
-          test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=params.interval)
-          path = './data/{}.csv'
-          read_path=path.format(params.signal)
+            train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1,yahoo=True)
+            test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1,yahoo=True)
+            read_path = './data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal)
 
-      elif params.dataset in ['A1','A2','A3','A4']:
+        elif not params.unique_dataset and (params.dataset not in ['A1','A2','A3','A4']):
+          train_data = od.load_signal(params.signal +'-train')
+          test_data = od.load_signal(params.signal +'-test')
 
-          train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1,yahoo=True)
-          test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1,yahoo=True)
-          read_path = './data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal)
+          train_dataset = SignalDataset(path='./data/{}-train.csv'.format(params.signal),interval=21600)
+          test_dataset = SignalDataset(path='./data/{}-test.csv'.format(params.signal),interval=21600,test=True)
+          read_path='./data/{}-test.csv'.format(params.signal)
 
-      else:
-        train_data = od.load_signal(params.signal +'-train')
-        test_data = od.load_signal(params.signal +'-test')
 
-        train_dataset = SignalDataset(path='./data/{}-train.csv'.format(params.signal),interval=21600)
-        test_dataset = SignalDataset(path='./data/{}-test.csv'.format(params.signal),interval=21600,test=True)
-        demo=False
-
+    # print(read_path)
     batch_size = params.batch_size
     test_loader = DataLoader(test_dataset, batch_size=batch_size, drop_last=False, shuffle=False,num_workers=6)
 
     lr = params.lr
 
+    signal_shape = params.signal_shape
+    if params.new_features:
+      dataset = params.dataset + '_newfeatures'
+    else:
+      dataset = params.dataset
+
+    if params.hyperbolic: PATH = './trained_models/models_{}_{}_{}/'.format(dataset,str(params.epochs),str(params.lr))+ params.signal
+    else: PATH = './trained_models/models_eucl_{}_{}_{}/'.format(dataset,str(params.epochs),str(params.lr))+ params.signal
     
-    latent_space_dim = 20
+    if (params.dataset in ['CASAS','ELINUS','eHealth']) and (not params.new_features):
+      PATH+='_id{}/'.format(params.id) 
+    if not os.path.isdir(PATH):
+        os.makedirs(PATH)
+    print(PATH)
+    if params.dataset in ['CASAS','ELINUS','eHealth']:
+          if not params.hyperbolic:
+            load_path = './trained_models/models_eucl_{}_{}_{}/BedDuration'.format(dataset,str(params.epochs),str(params.lr))
+          else:
+            load_path = './trained_models/models_{}_{}_{}/BedDuration'.format(dataset,str(params.epochs),str(params.lr))
 
-    if params.model == 'lstm':
-      model = model_LSTM.RecurrentAutoencoder(batch_size=64, seq_len=100,n_features=signal_shape, embedding_dim=latent_space_dim)
-      model = model.cuda()
+          if params.resume:
+            print("resuming epoch: {}".format(params.resume_epoch))
+            encoder = torch.load(load_path+'/encoder_{}.pt'.format(params.resume_epoch)).cuda()
+            decoder = torch.load(load_path+'/decoder_{}.pt'.format(params.resume_epoch)).cuda()
+            critic_x = torch.load(load_path+'/critic_x_{}.pt'.format(params.resume_epoch)).cuda()
+            critic_z = torch.load(load_path+'/critic_z_{}.pt'.format(params.resume_epoch)).cuda()
+          else:
+            encoder = torch.load(load_path+'/encoder.pt').cuda()
+            decoder = torch.load(load_path+'/decoder.pt').cuda()
+            critic_x = torch.load(load_path+'/critic_x.pt').cuda()
+            critic_z = torch.load(load_path+'/critic_z.pt').cuda()
 
-      optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999))
-      train_lstm(model, optimizer, train_loader, test_loader, n_epochs=params.epochs)
-      
-      known_anomalies = od.load_anomalies(params.signal)
+    else:
+          load_path = PATH
+          if params.resume:
+            # print("resuming epoch: {}".format(params.resume_epoch))
+            encoder = torch.load(load_path+'/encoder_{}.pt'.format(params.resume_epoch)).cuda()
+            decoder = torch.load(load_path+'/decoder_{}.pt'.format(params.resume_epoch)).cuda()
+            critic_x = torch.load(load_path+'/critic_x_{}.pt'.format(params.resume_epoch)).cuda()
+            critic_z = torch.load(load_path+'/critic_z_{}.pt'.format(params.resume_epoch)).cuda()
+          else:
+            encoder = torch.load(load_path+'/encoder.pt').cuda()
+            decoder = torch.load(load_path+'/decoder.pt').cuda()
+            critic_x = torch.load(load_path+'/critic_x.pt').cuda()
+            critic_z = torch.load(load_path+'/critic_z.pt').cuda()
+    
+    encoder.eval()
+    decoder.eval()
+    critic_x.eval()
+    critic_z.eval()
 
-      if demo:
-        anomaly_detection_lstm.test_lstm(test_loader, model, known_anomalies, path='./data/{}.csv'.format(params.signal), signal = params.signal)
-      else:
-        anomaly_detection_lstm.test_lstm(test_loader, model, known_anomalies, path='./data/{}-test.csv'.format(params.signal),signal = params.signal)
+    if params.dataset in  ['CASAS','ELINUS','eHealth','new_CASAS']  :
+        known_anomalies=[]
+    elif params.dataset in ['A1','A2','A3','A4']:
+        known_anomalies = pd.read_csv(read_path[:-4]+'_known_anomalies.csv')
+    else: 
+        known_anomalies = od.load_anomalies(params.signal)
 
-    elif params.model == 'tadgan':
-      signal_shape = params.signal_shape
-      if params.hyperbolic: PATH = './models_{}_{}_{}/'.format(params.dataset,str(params.epochs),str(params.lr))+ params.signal
-      else: PATH = './models_eucl_{}_{}_{}/'.format(params.dataset,str(params.epochs),str(params.lr))+ params.signal
-
-      encoder = torch.load(PATH+'/encoder.pt').cuda()
-      decoder = torch.load(PATH+'/decoder.pt').cuda()
-      critic_x = torch.load(PATH+'/critic_x.pt').cuda()
-      critic_z = torch.load(PATH+'/critic_z.pt').cuda()
-      
-      encoder.eval()
-      decoder.eval()
-      critic_x.eval()
-      critic_z.eval()
-
-      if params.dataset in  ['CASAS','new_CASAS']  :
-          known_anomalies=[]
-      elif params.dataset in ['A1','A2','A3','A4']:
-          known_anomalies = pd.read_csv(read_path[:-4]+'_known_anomalies.csv')
-      else: 
-          known_anomalies = od.load_anomalies(params.signal)
-
-      if demo:
-        test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=path.format(params.signal), signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, params=params)
-      else:
-        test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path='./data/{}-test.csv'.format(params.signal),signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)
+    test_tadgan(test_loader, encoder, decoder, critic_x, critic_z, known_anomalies, read_path=read_path,signal = params.signal, hyperbolic = params.hyperbolic, path=PATH, signal_shape=signal_shape, params=params)

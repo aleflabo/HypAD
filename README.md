@@ -17,7 +17,7 @@ To try HypAD just add the flag --hyperbolic:
 python main.py --dataset 'original' --signal 'D-15' --epochs=40 --lr=0.0005 --hyperbolic
 ```
 
-The YAHOO dataset can be found here https://webscope.sandbox.yahoo.com/catalog.php?datatype=s&did=70
+The YAHOO dataset can be requested here https://webscope.sandbox.yahoo.com/catalog.php?datatype=s&did=70
 
 #### Once trained, you can run the **Detector**
 add the flag --hyperbolic if you want to test the HypAD model you've trained
@@ -44,3 +44,4 @@ add the flag --hyperbolic if you want to use the hyperspace train
 python anomaly_detection.py --dataset 'new_CASAS' --signal 'fall' --signal_shape=150
 ```
 list of signals: [fall, weakness, nocturia. moretimeinchair, slowerwalking]
+Ask flaborea@di.uniroma1.it for the multivariate dataset.

@@ -10,11 +10,11 @@ When train == test, the flag --unique_dataset must be enabled.
 
 A TadGAN example:
 ```
-python main.py --dataset 'MSL' --signal 'D-15' --epochs=40 --lr=0.0005
+python main.py --dataset 'MSL' --signal 'M-6' --epochs=40 --lr=0.0005
 ```
 To try HypAD just add the flag --hyperbolic:
 ```
-python main.py --dataset 'original' --signal 'D-15' --epochs=40 --lr=0.0005 --hyperbolic
+python main.py --dataset 'MSL' --signal 'M-6' --epochs=40 --lr=0.0005 --hyperbolic
 ```
 
 The YAHOO dataset can be requested here https://webscope.sandbox.yahoo.com/catalog.php?datatype=s&did=70

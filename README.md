@@ -7,7 +7,7 @@
 
 The official PyTorch implementation of the **IEEE/CVF CVPR Visual Anomaly and Novelty Detection (VAND) Workshop** paper [**Are we certain it's anomalous?**](https://arxiv.org/abs/2211.09224).
 
-Visit our [**webpage**](https://www.pinlab.org/bestpractices2body) for more details.
+Visit our [**webpage**](https://www.pinlab.org/hypad) for more details.
 
 ![teaser](assets/teaser_hypad.png)
 

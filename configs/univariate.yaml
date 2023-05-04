@@ -1,0 +1,21 @@
+dataset: 'MSL'
+signal: 'C-2'
+epochs: 40
+hyperbolic: True
+signal_shape: 100
+lr: 0.0005
+batch_size: 64
+save_result: False  # save the results in a csv file
+filename: ''
+rec_error: 'dtw'
+combination: 'mult'  # ['recons','hyper_recons','mult','uncertainty','sum','sum_uncertainty','critic','critic_uncertainty']
+interval: 21600
+unique_dataset: False # if True, the dataset is the same for training and testing
+resume: False
+resume_epoch: 10 # epoch to resume, if resume is True
+load: False   # load stored vectors in the anomaly detection part
+
+
+new_features: False  # multivariate dataset
+id: 1 # multivariate dataset
+split: 1 # multivariate dataset

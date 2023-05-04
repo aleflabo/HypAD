@@ -1,49 +1,24 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-import os
-import logging
 import numpy as np
-
-import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.autograd import Variable
-from torch.utils.data import Dataset, DataLoader
-from hyperspace.hyrnn_nets import MobiusLinear, MobiusDist2Hyperplane
-import geoopt.manifolds.stereographic.math as gmath
+from hyperspace.hyrnn_nets import MobiusLinear
 
 class Encoder(nn.Module):
 
-    def __init__(self, signal_shape=100, latent_space_dim=20, hyperbolic=False, sequence_shape=100):
+    def __init__(self, signal_shape=100, latent_space_dim=20, hyperbolic=False):
         super(Encoder, self).__init__()
         self.signal_shape = signal_shape
-        self.sequence_shape = sequence_shape
         self.latent_space_dim = latent_space_dim
         self.lstm = nn.LSTM(input_size=self.signal_shape, hidden_size=50, num_layers=1, bidirectional=True)
         self.dense = nn.Linear(in_features=100, out_features=self.latent_space_dim)
-        self.hyperbolic = False
-        if self.hyperbolic:
-          self.hyperbolic_linear = MobiusLinear(self.latent_space_dim,
-                                          self.latent_space_dim,
-                                          # This computes an exmap0 after the operation, where the linear
-                                          # operation operates in the Euclidean space.
-                                          hyperbolic_input=False,
-                                          hyperbolic_bias=True,
-                                          nonlin=None,  # For now
-                                          fp64_hyper=False
-                                          )
+
 
     def forward(self, x):
-        x = x.view(self.sequence_shape, -1, self.signal_shape).float()
+        x = x.view(1, -1, self.signal_shape).float()
         x, (hn, cn) = self.lstm(x)
         x = self.dense(x)
-        if self.hyperbolic:
-          hyper_gen = self.hyperbolic_linear(x.view(-1, 20))
-          eucl = gmath.logmap0(hyper_gen, k=torch.tensor(-1.), dim=1).float()
-
-          return (eucl.view(1,-1,20),hyper_gen)
-
         return (x)
 
 class Decoder(nn.Module):
@@ -83,10 +58,9 @@ class Decoder(nn.Module):
         return (x)
 
 class CriticX(nn.Module):
-    def __init__(self, signal_shape=10, latent_space_dim=20, sequence_shape=100):
+    def __init__(self, signal_shape=10, latent_space_dim=20):
         super(CriticX, self).__init__()
         self.signal_shape = signal_shape
-        self.sequence_shape = sequence_shape
         self.latent_space_dim  =  latent_space_dim
         self.dropout = nn.Dropout(p=0.25)
         self.leakyrelu = nn.LeakyReLU(0.2)
@@ -139,33 +113,4 @@ def unroll_signal(self, x):
     x = np.array(x).reshape(100)
     return np.median(x)
 
-def test(self):
-    """
-    Returns a dataframe with original value, reconstructed value, reconstruction error, critic score
-    """
-    df = self.test_dataset.copy()
-    X_ = list()
 
-    RE = list()  #Reconstruction error
-    CS = list()  #Critic score
-
-    for i in range(0, df.shape[0]):
-        x = df.rolled_signal[i]
-        x = tf.reshape(x, (1, 100, 1))
-        z = encoder(x)
-        z = tf.expand_dims(z, axis=2)
-        x_ = decoder(z)
-
-        re = dtw_reconstruction_error(tf.squeeze(x_).numpy(), tf.squeeze(x).numpy()) #reconstruction error
-        cs = critic_x(x)
-        cs = tf.squeeze(cs).numpy()
-        RE.append(re)
-        CS.append(cs)
-
-        x_ = unroll_signal(x_)
-
-        X_.append(x_)
-
-    df['generated_signals'] = X_
-
-    return df

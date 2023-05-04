@@ -40,6 +40,7 @@ def parse_args():
     parser.add_argument('--resume_epoch', default=10, type=int,help ='epoch you want to resume')
     parser.add_argument('--load', action='store_true',help ='enable load saved pickles')
     parser.add_argument('--new_features', action='store_true',help ='ony for the Dario\'s datasets')
+    parser.add_argument('--config '       , default='dtw',      help='name of the file with results')
 
     return parser.parse_args()
 

@@ -17,6 +17,8 @@ import os
 
 import numpy as np
 import pandas as pd
+from utils.dataloader import SignalDataset
+from utils.dataloader_multivariate import CasasDataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -169,3 +171,67 @@ def load_anomalies(signal, edges=False):
         anomalies = pd.DataFrame(parts, columns=['start', 'end', 'score'])
 
     return anomalies
+
+
+def dataset_selection(params):
+    '''
+    DATASET SELECTION    
+    '''
+    # original CASAS dataset (test==train).  
+    if params.dataset == 'CASAS_':
+        path = '/content/drive/MyDrive/ASSISTED LIVING (e-linus)/Data&Experiments/DianeCookCASAS/'
+        train_dataset = CasasDataset(seq_path=path+'sequences_2week_{}.pt'.format(params.signal), 
+                                     gt_path=path+'ground_truth_2week_{}.pt'.format(params.signal), split=params.split)
+        test_dataset = CasasDataset(seq_path=path+'sequences_2week_{}.pt'.format(params.signal), 
+                                     gt_path=path+'ground_truth_2week_{}.pt'.format(params.signal), test=True)
+
+    # new_CASAS is the dataset proposed for CVPR '21 where the train&test splits have been created 
+    elif params.dataset == 'new_CASAS':
+        path = './data/CASAS/new_dataset/'
+        train_dataset = CasasDataset(seq_path=path+params.signal, 
+                                     gt_path=path+params.signal, split=params.split, dataset=params.dataset)
+        test_dataset = CasasDataset(seq_path=path+params.signal, 
+                                     gt_path=path+params.signal, test=True, dataset=params.dataset)
+        read_path = ''
+
+    elif params.dataset in ['CASAS','ELINUS','eHealth']:
+        if not params.new_features:
+          seq_path = "./data/DATASETS/{}/normal_sequences.pt".format(params.dataset)
+          seq_path_test = "./data/DATASETS/{}/POINTS/{}/{}_sequences_id{}.pt".format(params.dataset, params.signal, params.signal, params.id)
+          gt_path = "./data/DATASETS/{}/POINTS/{}/{}_groundtruth_id{}.pt".format(params.dataset, params.signal, params.signal,params.id)
+        else:
+          seq_path = "./data/DATASETS/{}/normal_sequences_newfeatures.pt".format(params.dataset)
+          seq_path_test = "./data/DATASETS/{}/POINTS_NEWFEATURES/{}_sequences_newfeatures.pt".format(params.dataset, params.signal, params.signal)
+          gt_path = "./data/DATASETS/{}/POINTS_NEWFEATURES/{}_groundtruth_newfeatures.pt".format(params.dataset, params.signal, params.signal)
+
+        train_dataset = CasasDataset(seq_path=seq_path, 
+                                     gt_path=gt_path, split=params.split, dataset=params.dataset)
+        test_dataset = CasasDataset(seq_path=seq_path_test, 
+                                     gt_path=gt_path, test=True, dataset=params.dataset)
+        read_path = ''
+
+
+    else:
+        # univariate dataset with train=test 
+        if params.unique_dataset:
+            # train_data = load_signal(params.signal)
+            # test_data = load_signal(params.signal)
+            train_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),interval=params.interval)
+            test_dataset = SignalDataset(path='./data/{}.csv'.format(params.signal),test=True,interval=params.interval)
+            read_path='./data/{}.csv'.format(params.signal)
+
+        # YAHOO dataset
+        elif params.dataset in ['A1','A2','A3','A4']:
+            train_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),interval=1,yahoo=True)
+            test_dataset = SignalDataset(path='./data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal),test=True,interval=1,yahoo=True)
+            read_path = './data/YAHOO/{}Benchmark/{}.csv'.format(params.dataset,params.signal)
+            
+        # univariate dataset with train!=test
+        else:
+            # train_data = load_signal(params.signal +'-train')
+            # test_data = load_signal(params.signal +'-test')
+            train_dataset = SignalDataset(path='./data/{}-train.csv'.format(params.signal),interval=params.interval)
+            test_dataset = SignalDataset(path='./data/{}-test.csv'.format(params.signal),interval=params.interval,test=True)
+            read_path='./data/{}-test.csv'.format(params.signal)
+            
+    return train_dataset, test_dataset, read_path # type: ignore

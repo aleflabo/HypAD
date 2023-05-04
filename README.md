@@ -40,7 +40,6 @@ Visit our [**webpage**](https://www.pinlab.org/hypad) for more details.
     ├── dataloader.py
     ├── data.py
     └── utils.py
-
 ```
 ## Setup
 ### Environment

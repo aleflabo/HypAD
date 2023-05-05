@@ -63,43 +63,40 @@ To run TadGAN and HypAD, you must pass one of the signals associated with each d
 You can find the list of datasets and signals in data/datasets.pickle.
 
 All the univariate datasets, except for 'SMAP' and 'MSL', use the same set for train and test. 
-When train == test, the flag --unique_dataset must be enabled. 
+When train == test, the flag unique_dataset must be set to True. 
 
-A TadGAN example:
+To run HypAD:
 ```
-python main.py --dataset 'MSL' --signal 'M-6' --epochs=40 --lr=0.0005
+python main.py --config configs/univariate.yaml
 ```
-To try HypAD just add the flag --hyperbolic:
-```
-python main.py --dataset 'MSL' --signal 'M-6' --epochs=40 --lr=0.0005 --hyperbolic
-```
-
-
+To run TadGAN just set the parameter **hyperbolic** to False
 
 
 #### Once trained, you can run the **Detector**
-add the flag --hyperbolic if you want to test the HypAD model you've trained
+
+Run the anomaly detector with the config used during trained which is stored in trained_models/models_{eucl/hyper}\_{signal}\_{epochs}_{lr}
 ```
-python anomaly_detection.py --dataset 'M-6' --signal 'D-15' --epochs=40 --lr=0.0005
+python anomaly_detection.py --config trained_models/models_{eucl/hyper}_{signal}_{epochs}_{lr}/config.yaml
 ```
 additional flags you can use:
-1. How to compute the reconstruction error --rec_error [dtw/area/point] (dtw by default) (not used with HypAD)
-2. How to combine critic_score and reconstruction_errror --combination [mult/sum/rec/critic/uncertainty] (mult by default, uncertainty only for HypAD)
+1. How to compute the reconstruction error **rec_error** [dtw/area/point] (dtw by default) (not used with HypAD)
+2. How to combine critic_score and reconstruction_errror **combination** [mult/sum/rec/critic/uncertainty] (mult by default, uncertainty only for HypAD)
+
 
 ### **Training+detector** on multivariate signals 
-A TadGAN example:
+
+To run HypAD:
 ```
-python main.py --dataset 'new_CASAS' --signal 'fall' --epochs=30 --lr=0.0005 --signal_shape=150
+python main.py --config configs/multivariate.yaml
 ```
-HypAD:
-```
-python main.py --dataset 'new_CASAS' --signal 'fall' --epochs=30 --lr=0.0005 --signal_shape=150 --hyperbolic
-```
+To run TadGAN just set the parameter **hyperbolic** to False
+
 
 #### Once trained, you can run the only **Detector**
-add the flag --hyperbolic if you want to use the HypAD train
+
+Run the anomaly detector with the config used during trained which is stored in trained_models/models_{eucl/hyper}\_{signal}\_{epochs}_{lr}
 ```
-python anomaly_detection.py --dataset 'new_CASAS' --signal 'fall' --signal_shape=150
+python anomaly_detection.py --config trained_models/models_{eucl/hyper}_{signal}_{epochs}_{lr}/config.yaml
 ```
 list of signals: [fall, weakness, nocturia. moretimeinchair, slowerwalking]
 

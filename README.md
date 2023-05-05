@@ -80,7 +80,7 @@ python anomaly_detection.py --config trained_models/models_{eucl/hyper}_{signal}
 ```
 additional flags you can use:
 1. How to compute the reconstruction error **rec_error** [dtw/area/point] (dtw by default) (not used with HypAD)
-2. How to combine critic_score and reconstruction_errror **combination** [mult/sum/rec/critic/uncertainty] (mult by default, uncertainty only for HypAD)
+2. How to combine critic_score and reconstruction_error **combination** [mult/sum/rec/critic/uncertainty] (mult by default, uncertainty only for HypAD)
 
 
 ### **Training+detector** on multivariate signals 

@@ -49,6 +49,10 @@ conda activate hypad
 ```
 
 ### Datasets
+:warning: **UPDATE 21/11/2023** :warning:
+
+The univariate datasets have been uploaded to this repo.
+
 :warning: **UPDATE 04/05/2023** :warning:
 
 At present, the univariate datasets are not available for download. To stay informed about the status of the site, please track this [issue](https://github.com/sintel-dev/Orion/issues/415) for updates.

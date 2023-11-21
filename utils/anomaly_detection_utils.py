@@ -1,245 +1,300 @@
-import numpy as np
-from scipy import stats,integrate
-import pickle
-import torch
 import math
-import pandas as pd
-from pyts.metrics import dtw
-from scipy.optimize import fmin
-import matplotlib.pyplot as plt
-from utils.dataloader import yahoo_preprocess
-from datetime import datetime
-from dateutil.rrule import rrule, SECONDLY
 import os
+import pickle
 import warnings
+from datetime import datetime
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+from dateutil.rrule import SECONDLY, rrule
+from pyts.metrics import dtw
+from scipy import integrate, stats
+from scipy.optimize import fmin
+
+from utils.dataloader import yahoo_preprocess
+
 warnings.filterwarnings("ignore")
 
 
-def univariate_anomaly_detection(recons_signal, true_signal, params, combination, critic_score, path, read_path, rec_error_type='euclidean', true_index=None, known_anomalies=None, signal=None, signal_shape=None):      
+def univariate_anomaly_detection(
+    recons_signal,
+    true_signal,
+    params,
+    combination,
+    critic_score,
+    path,
+    read_path,
+    rec_error_type="euclidean",
+    true_index=None,
+    known_anomalies=None,
+    signal=None,
+    signal_shape=None,
+):
+    if params.dataset in ["A1", "A2", "A3", "A4"]:
+        df = yahoo_preprocess(pd.read_csv(read_path))
+    else:
+        df = pd.read_csv(read_path)
 
-        if params.dataset in ['A1','A2','A3','A4']:
-            df = yahoo_preprocess(pd.read_csv(read_path))
-        else: 
-            df = pd.read_csv(read_path)
+    if not params.hyperbolic:
+        """
+        euclidean reconstruction error
+        """
+        final_scores, true_index, true, pred = score_anomalies(
+            true_signal,
+            recons_signal,
+            critic_score,
+            true_index,
+            rec_error_type=rec_error_type,
+            comb=combination,
+            path=path,
+        )
 
-        if not params.hyperbolic:
-            '''
-            euclidean reconstruction error
-            '''
-            final_scores, true_index, true, pred = score_anomalies(true_signal, recons_signal, critic_score, true_index, rec_error_type=rec_error_type, comb=combination, path=path)
+    else:
+        """
+        hyperbolic reconstruction error
+        """
+        true_data = torch.Tensor(recons_signal).reshape(-1, params.signal_shape)
+        pred_data = torch.Tensor(true_signal).reshape(-1, params.signal_shape)
 
-        else:
-            '''
-            hyperbolic reconstruction error
-            '''
-            true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
-            pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
-            
-            # hyperbolic distance
-            sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
-            squnorm = torch.sum(pred_data ** 2, dim=-1)
-            sqvnorm = torch.sum(true_data ** 2, dim=-1)
-            x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
-            rec_scores = torch.acosh(x_temp)
-            
-            
-            '''
+        # hyperbolic distance
+        sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
+        squnorm = torch.sum(pred_data**2, dim=-1)
+        sqvnorm = torch.sum(true_data**2, dim=-1)
+        x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
+        rec_scores = torch.acosh(x_temp)
+
+        """
             computing critic score if only combination in [mult, sum, critic_score, uncertainty]
-            '''
-            critic_scores = []
-            if combination in ['mult','uncertainty','sum','sum_uncertainty','critic','critic_uncertainty']:
-                critic_scores = compute_critic_scores(rec_scores, critic_score, true_signal, params, path)
-            
-            final_scores = combine_scores(combination, critic_scores, rec_scores, recons_signal)
-
-
-
-        intervals = find_anomalies(final_scores.reshape(-1), true_index,  # type: ignore
-                                  window_size_portion=0.33, 
-                                  window_step_size_portion=0.1, 
-                                  fixed_threshold=True)
-
-        try:
-            pred_anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
-            pred_anomalies.to_csv(path+'anomalies.csv')
-            
-            out=list(contextual_confusion_matrix(known_anomalies, pred_anomalies, data=df, weighted=False))
-            compute_metrics(known_anomalies, pred_anomalies)
-   
-        except Exception as e:
-            # if no anomalous intervals predicted
-            out = [0,0,0,0]
-            F1=0
-        
-        '''
-        Saving results in a csv file
-        '''
-        if params.save_result:
-          file_place = './results/{}'.format(params.filename)
-
-          if os.path.isfile(file_place):
-            res = pd.read_csv(file_place) 
-          else:
-            res = pd.DataFrame(columns=['signal','tn','fp','fn','tp'])
-            
-          if not params.signal in list(res['signal']):
-              out=[signal]+out
-              res.loc[len(res)] = out # type: ignore
-              res.to_csv(file_place, index=False)
-
-
-def multivariate_anomaly_detection(recons_signal, true_signal, params, combination, critic_score, path):      
-      
-        #just creating some random datetime index for the plots
-        random_index = list(rrule(SECONDLY, dtstart=datetime(2012, 11, 24), until=datetime(2012,11,30)))[:recons_signal.shape[0]]
-        x_index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
-        index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
-        torch.save(x_index, path+'x_index.pt')
-
-        '''
-        loading ground truth anomalies
-        '''
-        if params.dataset=='new_CASAS':
-            y=torch.load('./data/CASAS/new_dataset/{}/y_test'.format(params.signal))
-        else:
-            y=torch.load("./data/DATASETS/{}/POINTS/{}/{}_groundtruth_id{}.pt".format(params.dataset, params.signal, params.signal, params.id))
-        y = y.reshape(y.shape[0]*y.shape[1], -1)[:x_index.shape[0]]
-
-
-        if not params.hyperbolic:
-          '''
-          euclidean reconstruction error
-          '''
-          rec_scores = np.linalg.norm(true_signal-recons_signal,axis=1)
-          # rec_scores = pd.Series(rec_scores).rolling(
-          #     smoothing_window, center=True, min_periods=smoothing_window // 2).mean().values
-          rec_scores = stats.zscore(rec_scores)
-          rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
-
-        else:
-          '''
-          hyperbolic reconstruction error
-          '''
-          true_data = torch.Tensor(recons_signal).reshape(-1,params.signal_shape)
-          pred_data = torch.Tensor(true_signal).reshape(-1,params.signal_shape)
-          
-          # hyperbolic distance
-          sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
-          squnorm = torch.sum(pred_data ** 2, dim=-1)
-          sqvnorm = torch.sum(true_data ** 2, dim=-1)
-          x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
-          rec_scores = torch.acosh(x_temp)
-          
-          rec_scores = stats.zscore(rec_scores)
-          rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
-
-        '''
-        computing critic score if only combination in ['mult','uncertainty','sum','sum_uncertainty','critic','critic_uncertainty']
-        '''
+            """
         critic_scores = []
-        if combination in ['mult','uncertainty','sum','sum_uncertainty','critic','critic_uncertainty']:
-            critic_scores = compute_critic_scores(rec_scores, critic_score, true_signal, params, path)
-            
-        final_scores = combine_scores(combination, critic_scores, rec_scores, recons_signal)
+        if combination in [
+            "mult",
+            "uncertainty",
+            "sum",
+            "sum_uncertainty",
+            "critic",
+            "critic_uncertainty",
+        ]:
+            critic_scores = compute_critic_scores(
+                rec_scores, critic_score, true_signal, params, path
+            )
 
+        final_scores = combine_scores(
+            combination, critic_scores, rec_scores, recons_signal
+        )
 
-        torch.save(x_index, path+'true_index.pt')
+    intervals = find_anomalies(
+        final_scores.reshape(-1),
+        true_index,  # type: ignore
+        window_size_portion=0.33,
+        window_step_size_portion=0.1,
+        fixed_threshold=True,
+    )
 
-        # intervals = find_anomalies(final_scores, x_index, 
-        #                       window_size_portion=0.2, 
-        #                       window_size=1410,
-        #                       window_step_size_portion=None, 
-        #                       fixed_threshold=True,
-        #                       anomaly_padding=200)
-        intervals = find_anomalies(final_scores, x_index, 
-                              window_size_portion=0.2, 
-                              window_step_size_portion=0.1, 
-                              fixed_threshold=True,
-                              anomaly_padding=200)
+    try:
+        pred_anomalies = pd.DataFrame(intervals, columns=["start", "end", "score"])
+        pred_anomalies.to_csv(path + "anomalies.csv")
 
-        pred_anomalies = pd.DataFrame(intervals, columns=['start', 'end', 'score'])
-        print('Predicted Anomalies: \n', pred_anomalies[['start','end']])
-        pred_anomalies.to_csv(path+'pred_anomalies.csv')
-        known_anomalies = casas_anomalies(y,x_index)
-        anomalies = [pred_anomalies , known_anomalies]
-        plot_anomalies(anomalies, x_index, y, path)
-        
+        out = list(
+            contextual_confusion_matrix(
+                known_anomalies, pred_anomalies, data=df, weighted=False
+            )
+        )
         compute_metrics(known_anomalies, pred_anomalies)
+
+    except Exception as e:
+        # if no anomalous intervals predicted
+        out = [0, 0, 0, 0]
+        F1 = 0
+
+    """
+        Saving results in a csv file
+        """
+    if params.save_result:
+        file_place = "./results/{}".format(params.filename)
+
+        if os.path.isfile(file_place):
+            res = pd.read_csv(file_place)
+        else:
+            res = pd.DataFrame(columns=["signal", "tn", "fp", "fn", "tp"])
+
+        if not params.signal in list(res["signal"]):
+            out = [signal] + out
+            res.loc[len(res)] = out  # type: ignore
+            res.to_csv(file_place, index=False)
+
+
+def multivariate_anomaly_detection(
+    recons_signal, true_signal, params, combination, critic_score, path
+):
+    # just creating some random datetime index for the plots
+    random_index = list(
+        rrule(SECONDLY, dtstart=datetime(2012, 11, 24), until=datetime(2012, 11, 30))
+    )[: recons_signal.shape[0]]
+    x_index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
+    index = np.array(list(map(lambda x: datetime.timestamp(x), random_index)))
+    torch.save(x_index, path + "x_index.pt")
+
+    """
+        loading ground truth anomalies
+        """
+    if params.dataset == "new_CASAS":
+        y = torch.load("./data/CASAS/new_dataset/{}/y_test".format(params.signal))
+    else:
+        y = torch.load(
+            "./data/DATASETS/{}/POINTS/{}/{}_groundtruth_id{}.pt".format(
+                params.dataset, params.signal, params.signal, params.id
+            )
+        )
+    y = y.reshape(y.shape[0] * y.shape[1], -1)[: x_index.shape[0]]
+
+    if not params.hyperbolic:
+        """
+        euclidean reconstruction error
+        """
+        rec_scores = np.linalg.norm(true_signal - recons_signal, axis=1)
+        # rec_scores = pd.Series(rec_scores).rolling(
+        #     smoothing_window, center=True, min_periods=smoothing_window // 2).mean().values
+        rec_scores = stats.zscore(rec_scores)
+        rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
+
+    else:
+        """
+        hyperbolic reconstruction error
+        """
+        true_data = torch.Tensor(recons_signal).reshape(-1, params.signal_shape)
+        pred_data = torch.Tensor(true_signal).reshape(-1, params.signal_shape)
+
+        # hyperbolic distance
+        sqdist = torch.sum((pred_data - true_data) ** 2, dim=1)
+        squnorm = torch.sum(pred_data**2, dim=-1)
+        sqvnorm = torch.sum(true_data**2, dim=-1)
+        x_temp = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + 1e-7
+        rec_scores = torch.acosh(x_temp)
+
+        rec_scores = stats.zscore(rec_scores)
+        rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
+
+    """
+        computing critic score if only combination in ['mult','uncertainty','sum','sum_uncertainty','critic','critic_uncertainty']
+        """
+    critic_scores = []
+    if combination in [
+        "mult",
+        "uncertainty",
+        "sum",
+        "sum_uncertainty",
+        "critic",
+        "critic_uncertainty",
+    ]:
+        critic_scores = compute_critic_scores(
+            rec_scores, critic_score, true_signal, params, path
+        )
+
+    final_scores = combine_scores(combination, critic_scores, rec_scores, recons_signal)
+
+    torch.save(x_index, path + "true_index.pt")
+
+    # intervals = find_anomalies(final_scores, x_index,
+    #                       window_size_portion=0.2,
+    #                       window_size=1410,
+    #                       window_step_size_portion=None,
+    #                       fixed_threshold=True,
+    #                       anomaly_padding=200)
+    intervals = find_anomalies(
+        final_scores,
+        x_index,
+        window_size_portion=0.2,
+        window_step_size_portion=0.1,
+        fixed_threshold=True,
+        anomaly_padding=200,
+    )
+
+    pred_anomalies = pd.DataFrame(intervals, columns=["start", "end", "score"])
+    print("Predicted Anomalies: \n", pred_anomalies[["start", "end"]])
+    pred_anomalies.to_csv(path + "pred_anomalies.csv")
+    known_anomalies = casas_anomalies(y, x_index)
+    anomalies = [pred_anomalies, known_anomalies]
+    plot_anomalies(anomalies, x_index, y, path)
+
+    compute_metrics(known_anomalies, pred_anomalies)
 
 
 def compute_critic_scores(rec_scores, critic_score, true_signal, params, path):
-        '''
-        computing critic score if only combination in [mult, sum, critic_score, uncertainty]
-        '''
-        if params.load and os.path.exists(path+'critic_scores.pickle'):
-            with open(path+'critic_scores.pickle', 'rb') as handle:
-                critic_scores = pickle.load(handle)
-        else:
-            critic_scores = final_critic_scores(critic_score,true_signal)
-            with open(path+'critic_scores.pickle', 'wb') as handle:
-                pickle.dump(critic_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        critic_scores = critic_scores[:rec_scores.shape[0]]
-        
-        return critic_scores
+    """
+    computing critic score if only combination in [mult, sum, critic_score, uncertainty]
+    """
+    if params.load and os.path.exists(path + "critic_scores.pickle"):
+        with open(path + "critic_scores.pickle", "rb") as handle:
+            critic_scores = pickle.load(handle)
+    else:
+        critic_scores = final_critic_scores(critic_score, true_signal)
+        with open(path + "critic_scores.pickle", "wb") as handle:
+            pickle.dump(critic_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    critic_scores = critic_scores[: rec_scores.shape[0]]
+
+    return critic_scores
 
 
 def compute_metrics(known_anomalies, pred_anomalies):
-        '''
-        computing F1 score and gmean
-        '''
-        tn, fp, fn, tp = contextual_confusion_matrix(known_anomalies, pred_anomalies, weighted=False )
-        precision = tp/(tp+fp)
-        recall = tp/(tp+fn)
+    """
+    computing F1 score and gmean
+    """
+    tn, fp, fn, tp = contextual_confusion_matrix(
+        known_anomalies, pred_anomalies, weighted=False
+    )
+    precision = tp / (tp + fp)
+    recall = tp / (tp + fn)
 
-        F1 = 2 * (precision * recall) / (precision + recall)
-        gmean = np.sqrt(precision*recall)
-        print('precision: {}, recall: {}'.format(precision, recall))
-        print('f1_score: {}, gmean: {}'.format(F1,gmean))
-        
+    F1 = 2 * (precision * recall) / (precision + recall)
+    gmean = np.sqrt(precision * recall)
+    print("precision: {}, recall: {}".format(precision, recall))
+    print("f1_score: {}, gmean: {}".format(F1, gmean))
+
 
 def convert_date_single(x):
     return datetime.fromtimestamp(x)
 
 
 def plot_anomalies(anomalies, x_index, y, path):
-        colors = ['red'] + ['green'] * (len(anomalies) - 1)
-        plt.rcParams["figure.figsize"] = (50,10)
-        fig = plt.figure()
+    colors = ["red"] + ["green"] * (len(anomalies) - 1)
+    plt.rcParams["figure.figsize"] = (50, 10)
+    fig = plt.figure()
 
-        for i, anomaly in enumerate(anomalies):
-            anomaly = list(anomaly[['start', 'end']].itertuples(index=False))
+    for i, anomaly in enumerate(anomalies):
+        anomaly = list(anomaly[["start", "end"]].itertuples(index=False))
 
-        for _, anom in enumerate(anomaly):
-            t1 = convert_date_single(anom[0])
-            t2 = convert_date_single(anom[1])
-            plt.axvspan(t1, t2, color=colors[i], alpha=0.2)
-            plt.plot(list(map(lambda x: convert_date_single(x), x_index[:len(y)] )), y)
-        plt.show()
-        fig.savefig(path+'anomalies.png', dpi=fig.dpi)
-        print('The plot with the anomalies is visible at {}'.format(path))
-
-
+    for _, anom in enumerate(anomaly):
+        t1 = convert_date_single(anom[0])
+        t2 = convert_date_single(anom[1])
+        plt.axvspan(t1, t2, color=colors[i], alpha=0.2)
+        plt.plot(list(map(lambda x: convert_date_single(x), x_index[: len(y)])), y)
+    plt.show()
+    fig.savefig(path + "anomalies.png", dpi=fig.dpi)
+    print("The plot with the anomalies is visible at {}".format(path))
 
 
-def casas_anomalies(y,x_index):
+def casas_anomalies(y, x_index):
     # loading casas anomalies in the correct format
     gt_anomal = []
     actual = None
 
-    y = y.reshape(y.shape[0]*y.shape[1], -1)[:x_index.shape[0]]
-    for i in range(len(y.reshape(-1)==1)):
-      if y[i]==1:
-        if actual == None:
-          actual = i
-          start = x_index[i]
+    y = y.reshape(y.shape[0] * y.shape[1], -1)[: x_index.shape[0]]
+    for i in range(len(y.reshape(-1) == 1)):
+        if y[i] == 1:
+            if actual == None:
+                actual = i
+                start = x_index[i]
+            else:
+                actual = i
         else:
-          actual = i
-      else:
-        if actual != None:
-          gt_anomal.append((start, x_index[actual-1])) # type: ignore
-          actual = None
+            if actual != None:
+                gt_anomal.append((start, x_index[actual - 1]))  # type: ignore
+                actual = None
 
-    gt_anomal = pd.DataFrame.from_records(gt_anomal, columns =['start', 'end'])
+    gt_anomal = pd.DataFrame.from_records(gt_anomal, columns=["start", "end"])
     return gt_anomal
 
 
@@ -247,6 +302,7 @@ def _overlap(expected, observed):
     first = expected[0] - observed[1]
     second = expected[1] - observed[0]
     return first * second < 0
+
 
 def _compute_critic_score(critics, smooth_window):
     """Compute an array of anomaly scores.
@@ -267,79 +323,102 @@ def _compute_critic_score(critics, smooth_window):
     critic_std = np.std(critics)
 
     z_scores = np.absolute((np.asarray(critics) - critic_mean) / critic_std) + 1
-    z_scores = pd.Series(z_scores).rolling(
-        smooth_window, center=True, min_periods=smooth_window // 2).mean().values
+    z_scores = (
+        pd.Series(z_scores)
+        .rolling(smooth_window, center=True, min_periods=smooth_window // 2)
+        .mean()
+        .values
+    )
 
     return z_scores
 
-def combine_scores(combination,critic_scores=[],rec_scores=[],recons_signal=[]):
-        
-    if combination=='sum':
-        final_scores = 0.2*critic_scores + 0.8*rec_scores
-    elif combination=='mult':
+
+def combine_scores(combination, critic_scores=[], rec_scores=[], recons_signal=[]):
+    if combination == "sum":
+        final_scores = 0.2 * critic_scores + 0.8 * rec_scores
+    elif combination == "mult":
         final_scores = np.multiply(critic_scores, rec_scores)
-    elif combination=='uncertainty':
-        uncertainty_scores = np.linalg.norm(recons_signal,axis=1)
+    elif combination == "uncertainty":
+        uncertainty_scores = np.linalg.norm(recons_signal, axis=1)
         final_scores = np.multiply(critic_scores, rec_scores) * uncertainty_scores
-    elif combination=='critic':
+    elif combination == "critic":
         final_scores = critic_scores
-    elif combination=='critic_uncertainty':
-        uncertainty_scores = np.linalg.norm(recons_signal,axis=1)
+    elif combination == "critic_uncertainty":
+        uncertainty_scores = np.linalg.norm(recons_signal, axis=1)
         # uncertainty_scores = np.concatenate([np.repeat(uncertainty_scores[0],99),uncertainty_scores])
-        final_scores = critic_scores*uncertainty_scores
-    elif combination=='sum_uncertainty':
-        uncertainty_scores = np.linalg.norm(recons_signal,axis=1)
-        final_scores = 0.5*critic_scores*uncertainty_scores[:rec_scores.shape[0]] + 0.5*rec_scores*uncertainty_scores[:rec_scores.shape[0]]
-    elif combination=='rec':
+        final_scores = critic_scores * uncertainty_scores
+    elif combination == "sum_uncertainty":
+        uncertainty_scores = np.linalg.norm(recons_signal, axis=1)
+        final_scores = (
+            0.5 * critic_scores * uncertainty_scores[: rec_scores.shape[0]]
+            + 0.5 * rec_scores * uncertainty_scores[: rec_scores.shape[0]]
+        )
+    elif combination == "rec":
         final_scores = rec_scores
-    elif combination=='rec_uncertainty':
-        uncertainty_scores = np.linalg.norm(recons_signal,axis=1)
-        final_scores = rec_scores*uncertainty_scores
+    elif combination == "rec_uncertainty":
+        uncertainty_scores = np.linalg.norm(recons_signal, axis=1)
+        final_scores = rec_scores * uncertainty_scores
 
-    return final_scores # type: ignore
-
-
-def final_critic_scores(critic_score,true_signal):
-      step_size = 1
-      smooth=True
-      score_window=10
-      smoothing_window = math.trunc(true_signal.shape[0] * 0.01)
-      critic_smooth_window = math.trunc(true_signal.shape[0] * 0.01)
-
-      critic_extended = list()
-      for c in critic_score:
-          critic_extended.extend(np.repeat(c, true_signal.shape[1]).tolist())
-      critic_extended = np.asarray(critic_extended).reshape((-1, true_signal.shape[1]))
-
-      critic_kde_max = []
-      pred_length = true_signal.shape[1]
-      num_errors = true_signal.shape[1] + step_size * (true_signal.shape[0] - 1)
-
-      for i in range(num_errors):
-          critic_intermediate = []
-
-          for j in range(max(0, i - num_errors + pred_length), min(i + 1, pred_length)):
-              critic_intermediate.append(critic_extended[i - j, j])
-
-          if len(critic_intermediate) > 1:
-              discr_intermediate = np.asarray(critic_intermediate)
-              try:
-              
-                  critic_kde_max.append(discr_intermediate[np.argmax(
-                      stats.gaussian_kde(discr_intermediate)(critic_intermediate))])
-              except np.linalg.LinAlgError:
-                  critic_kde_max.append(np.median(discr_intermediate))
-          else:
-              critic_kde_max.append(np.median(np.asarray(critic_intermediate)))
-
-      # Compute critic scores
-      critic_scores = _compute_critic_score(critic_kde_max, critic_smooth_window)
-      return critic_scores
+    return final_scores  # type: ignore
 
 
-def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_window=None,
-                    error_smooth_window=None, smooth=True, rec_error_type="point", comb="mult",
-                    lambda_rec=0.5,path=None,samples_num='0'):
+def final_critic_scores(critic_score, true_signal):
+    step_size = 1
+    smooth = True
+    score_window = 10
+    smoothing_window = math.trunc(true_signal.shape[0] * 0.01)
+    critic_smooth_window = math.trunc(true_signal.shape[0] * 0.01)
+
+    critic_extended = list()
+    for c in critic_score:
+        critic_extended.extend(np.repeat(c, true_signal.shape[1]).tolist())
+    critic_extended = np.asarray(critic_extended).reshape((-1, true_signal.shape[1]))
+
+    critic_kde_max = []
+    pred_length = true_signal.shape[1]
+    num_errors = true_signal.shape[1] + step_size * (true_signal.shape[0] - 1)
+
+    for i in range(num_errors):
+        critic_intermediate = []
+
+        for j in range(max(0, i - num_errors + pred_length), min(i + 1, pred_length)):
+            critic_intermediate.append(critic_extended[i - j, j])
+
+        if len(critic_intermediate) > 1:
+            discr_intermediate = np.asarray(critic_intermediate)
+            try:
+                critic_kde_max.append(
+                    discr_intermediate[
+                        np.argmax(
+                            stats.gaussian_kde(discr_intermediate)(critic_intermediate)
+                        )
+                    ]
+                )
+            except np.linalg.LinAlgError:
+                critic_kde_max.append(np.median(discr_intermediate))
+        else:
+            critic_kde_max.append(np.median(np.asarray(critic_intermediate)))
+
+    # Compute critic scores
+    critic_scores = _compute_critic_score(critic_kde_max, critic_smooth_window)
+    return critic_scores
+
+
+def score_anomalies(
+    y,
+    y_hat,
+    critic,
+    index,
+    score_window=10,
+    critic_smooth_window=None,
+    error_smooth_window=None,
+    smooth=True,
+    rec_error_type="point",
+    comb="mult",
+    lambda_rec=0.5,
+    path=None,
+    samples_num="0",
+):
     """Compute an array of anomaly scores.
     Anomaly scores are calculated using a combination of reconstruction error and critic score.
     Args:
@@ -388,12 +467,12 @@ def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_wind
     for item in y[-1][1:]:
         true.extend(item)
 
-    if (not path) or (path and not os.path.exists(path+'critic_scores.pickle')):
+    if (not path) or (path and not os.path.exists(path + "critic_scores.pickle")):
         critic_extended = list()
         for c in critic:
             critic_extended.extend(np.repeat(c, y_hat.shape[1]).tolist())
         critic_extended = np.asarray(critic_extended).reshape((-1, y_hat.shape[1]))
-        
+
         critic_kde_max = []
         pred_length = y_hat.shape[1]
         num_errors = y_hat.shape[1] + step_size * (y_hat.shape[0] - 1)
@@ -401,15 +480,23 @@ def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_wind
         for i in range(num_errors):
             critic_intermediate = []
 
-            for j in range(max(0, i - num_errors + pred_length), min(i + 1, pred_length)):
+            for j in range(
+                max(0, i - num_errors + pred_length), min(i + 1, pred_length)
+            ):
                 critic_intermediate.append(critic_extended[i - j, j])
 
             if len(critic_intermediate) > 1:
                 discr_intermediate = np.asarray(critic_intermediate)
                 try:
-              
-                    critic_kde_max.append(discr_intermediate[np.argmax(
-                        stats.gaussian_kde(discr_intermediate)(critic_intermediate))])
+                    critic_kde_max.append(
+                        discr_intermediate[
+                            np.argmax(
+                                stats.gaussian_kde(discr_intermediate)(
+                                    critic_intermediate
+                                )
+                            )
+                        ]
+                    )
                 except np.linalg.LinAlgError:
                     critic_kde_max.append(np.median(discr_intermediate))
             else:
@@ -417,53 +504,58 @@ def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_wind
 
         # Compute critic scores
         critic_scores = _compute_critic_score(critic_kde_max, critic_smooth_window)
-        
-        
+
         if path:
-          with open(path+'critic_scores.pickle', 'wb') as handle:
+            with open(path + "critic_scores.pickle", "wb") as handle:
                 pickle.dump(critic_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     else:
-          with open(path+'critic_scores.pickle', 'rb') as handle:
+        with open(path + "critic_scores.pickle", "rb") as handle:
             critic_scores = pickle.load(handle)
 
-    for ret in ['point','area','dtw']:
-      if path and not os.path.exists(path+ret+'.pickle'):
+    for ret in ["point", "area", "dtw"]:
+        if path and not os.path.exists(path + ret + ".pickle"):
+            # Compute reconstruction scores
+            rec_scores, predictions = reconstruction_errors(
+                y, y_hat, step_size, score_window, error_smooth_window, smooth, ret
+            )  # type: ignore
 
-          # Compute reconstruction scores
-          rec_scores, predictions = reconstruction_errors(
-              y, y_hat, step_size, score_window, error_smooth_window, smooth, ret) # type: ignore
-          
-          rec_scores = stats.zscore(rec_scores)
-          rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
+            rec_scores = stats.zscore(rec_scores)
+            rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
 
-          if path:
-            with open(path+ret+'.pickle', 'wb') as handle:
-                  pickle.dump(rec_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            if path:
+                with open(path + ret + ".pickle", "wb") as handle:
+                    pickle.dump(rec_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    if (not path) or (path and not os.path.exists(path+rec_error_type+'.pickle')):
-
+    if (not path) or (path and not os.path.exists(path + rec_error_type + ".pickle")):
         # Compute reconstruction scores
         rec_scores, predictions = reconstruction_errors(
-            y, y_hat, step_size, score_window, error_smooth_window, smooth, rec_error_type) # type: ignore
-        
+            y,
+            y_hat,
+            step_size,
+            score_window,
+            error_smooth_window,
+            smooth,
+            rec_error_type,
+        )  # type: ignore
+
         rec_scores = stats.zscore(rec_scores)
         rec_scores = np.clip(rec_scores, a_min=0, a_max=None) + 1
 
         if path:
-          with open(path+rec_error_type+'.pickle', 'wb') as handle:
+            with open(path + rec_error_type + ".pickle", "wb") as handle:
                 pickle.dump(rec_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
     else:
-        with open(path+rec_error_type+'.pickle', 'rb') as handle:
+        with open(path + rec_error_type + ".pickle", "rb") as handle:
             rec_scores = pickle.load(handle)
-            predictions=[]
-            
+            predictions = []
+
     # Combine the two scores
     if comb == "mult":
-        final_scores = np.multiply(critic_scores, rec_scores) # type: ignore
+        final_scores = np.multiply(critic_scores, rec_scores)  # type: ignore
 
     elif comb == "sum":
-        final_scores = (1 - lambda_rec) * (critic_scores - 1) + lambda_rec * (rec_scores - 1) # type: ignore
+        final_scores = (1 - lambda_rec) * (critic_scores - 1) + lambda_rec * (rec_scores - 1)  # type: ignore
 
     elif comb == "rec":
         final_scores = rec_scores
@@ -472,13 +564,17 @@ def score_anomalies(y, y_hat, critic, index, score_window=10, critic_smooth_wind
         final_scores = critic_scores
     else:
         raise ValueError(
-            'Unknown combination specified {}, use "mult", "sum", or "rec" instead.'.format(comb))
+            'Unknown combination specified {}, use "mult", "sum", or "rec" instead.'.format(
+                comb
+            )
+        )
 
     true = [[t] for t in true]
     # with open(path+rec_error_type+'_{}.pickle'.format(samples_num), 'wb') as handle:
     #       pickle.dump(rec_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     return final_scores, true_index, true, predictions
+
 
 def _overlap_segment(expected, observed, start=None, end=None):
     tp, fp, fn = 0, 0, 0
@@ -507,8 +603,9 @@ def _pad(lst):
     return [(part[0], part[1] + 1) for part in lst]
 
 
-def contextual_confusion_matrix(expected, observed, data=None,
-                                start=None, end=None, weighted=True):
+def contextual_confusion_matrix(
+    expected, observed, data=None, start=None, end=None, weighted=True
+):
     """Compute the confusion matrix between the ground truth and the detected anomalies.
 
     Args:
@@ -535,7 +632,7 @@ def contextual_confusion_matrix(expected, observed, data=None,
     """
 
     def _ws(x, y, z, w):
-        return _weighted_segment(x, y, _contextual_partition, z, w) # type: ignore
+        return _weighted_segment(x, y, _contextual_partition, z, w)  # type: ignore
 
     if weighted:
         function = _ws
@@ -543,13 +640,13 @@ def contextual_confusion_matrix(expected, observed, data=None,
         function = _overlap_segment
 
     if data is not None:
-        start = data['timestamp'].min()
-        end = data['timestamp'].max()
+        start = data["timestamp"].min()
+        end = data["timestamp"].max()
 
     if not isinstance(expected, list):
-        expected = list(expected[['start', 'end']].itertuples(index=False))
+        expected = list(expected[["start", "end"]].itertuples(index=False))
     if not isinstance(observed, list):
-        observed = list(observed[['start', 'end']].itertuples(index=False))
+        observed = list(observed[["start", "end"]].itertuples(index=False))
 
     expected = _pad(expected)
     observed = _pad(observed)
@@ -558,26 +655,32 @@ def contextual_confusion_matrix(expected, observed, data=None,
 
 
 def prune_false_positive(is_anomaly, anomaly_score, change_threshold):
-    #The model might detect a high number of false positives.
-    #In such a scenario, pruning of the false positive is suggested.
-    #Method used is as described in the Section 5, part D Identifying Anomalous
-    #Sequence, sub-part - Mitigating False positives
-    #TODO code optimization
+    # The model might detect a high number of false positives.
+    # In such a scenario, pruning of the false positive is suggested.
+    # Method used is as described in the Section 5, part D Identifying Anomalous
+    # Sequence, sub-part - Mitigating False positives
+    # TODO code optimization
     seq_details = []
     delete_sequence = 0
     start_position = 0
     end_position = 0
     max_seq_element = anomaly_score[0]
     for i in range(1, len(is_anomaly)):
-        if i+1 == len(is_anomaly):
+        if i + 1 == len(is_anomaly):
             seq_details.append([start_position, i, max_seq_element, delete_sequence])
-        elif is_anomaly[i] == 1 and is_anomaly[i+1] == 0:
+        elif is_anomaly[i] == 1 and is_anomaly[i + 1] == 0:
             end_position = i
-            seq_details.append([start_position, end_position, max_seq_element, delete_sequence])
-        elif is_anomaly[i] == 1 and is_anomaly[i-1] == 0:
+            seq_details.append(
+                [start_position, end_position, max_seq_element, delete_sequence]
+            )
+        elif is_anomaly[i] == 1 and is_anomaly[i - 1] == 0:
             start_position = i
             max_seq_element = anomaly_score[i]
-        if is_anomaly[i] == 1 and is_anomaly[i-1] == 1 and anomaly_score[i] > max_seq_element:
+        if (
+            is_anomaly[i] == 1
+            and is_anomaly[i - 1] == 1
+            and anomaly_score[i] > max_seq_element
+        ):
             max_seq_element = anomaly_score[i]
 
     max_elements = list()
@@ -588,20 +691,21 @@ def prune_false_positive(is_anomaly, anomaly_score, change_threshold):
     max_elements = np.array(max_elements)
     change_percent = abs(max_elements[1:] - max_elements[:-1]) / max_elements[1:]
 
-    #Appending 0 for the 1 st element which is not change percent
+    # Appending 0 for the 1 st element which is not change percent
     delete_seq = np.append(np.array([0]), change_percent < change_threshold)
 
-    #Mapping max element and seq details
+    # Mapping max element and seq details
     for i, max_elt in enumerate(max_elements):
         for j in range(0, len(seq_details)):
             if seq_details[j][2] == max_elt:
                 seq_details[j][3] = delete_seq[i]
 
     for seq in seq_details:
-        if seq[3] == 1: #Delete sequence
-            is_anomaly[seq[0]:seq[1]+1] = [0] * (seq[1] - seq[0] + 1)
- 
+        if seq[3] == 1:  # Delete sequence
+            is_anomaly[seq[0] : seq[1] + 1] = [0] * (seq[1] - seq[0] + 1)
+
     return is_anomaly
+
 
 def detect_anomaly(anomaly_score):
     window_size = len(anomaly_score) // 3
@@ -610,7 +714,7 @@ def detect_anomaly(anomaly_score):
     is_anomaly = np.zeros(len(anomaly_score))
 
     for i in range(0, len(anomaly_score) - window_size, step_size):
-        window_elts = anomaly_score[i:i+window_size]
+        window_elts = anomaly_score[i : i + window_size]
         window_mean = np.mean(window_elts)
         window_std = np.std(window_mean)
 
@@ -621,6 +725,7 @@ def detect_anomaly(anomaly_score):
                 is_anomaly[i + j] = 1
 
     return is_anomaly
+
 
 def regression_errors(y, y_hat, smoothing_window=0.01, smooth=True):
     """Compute an array of absolute errors comparing predictions and expected output.
@@ -691,10 +796,16 @@ def _area_error(y, y_hat, score_window=10):
         ndarray:
             An array of area error.
     """
-    smooth_y = pd.Series(y).rolling(
-        score_window, center=True, min_periods=score_window // 2).apply(integrate.trapz)
-    smooth_y_hat = pd.Series(y_hat).rolling(
-        score_window, center=True, min_periods=score_window // 2).apply(integrate.trapz)
+    smooth_y = (
+        pd.Series(y)
+        .rolling(score_window, center=True, min_periods=score_window // 2)
+        .apply(integrate.trapz)
+    )
+    smooth_y_hat = (
+        pd.Series(y_hat)
+        .rolling(score_window, center=True, min_periods=score_window // 2)
+        .apply(integrate.trapz)
+    )
 
     errors = abs(smooth_y - smooth_y_hat)
 
@@ -722,33 +833,45 @@ def _dtw_error(y, y_hat, score_window=10):
     """
     length_dtw = (score_window // 2) * 2 + 1
     half_length_dtw = length_dtw // 2
-    
+
     # add padding
-    y_pad = np.pad(y, (half_length_dtw, half_length_dtw),
-                   'constant', constant_values=(0, 0))
-    y_hat_pad = np.pad(y_hat, (half_length_dtw, half_length_dtw),
-                       'constant', constant_values=(0, 0))
+    y_pad = np.pad(
+        y, (half_length_dtw, half_length_dtw), "constant", constant_values=(0, 0)
+    )
+    y_hat_pad = np.pad(
+        y_hat, (half_length_dtw, half_length_dtw), "constant", constant_values=(0, 0)
+    )
 
     i = 0
     similarity_dtw = list()
     while i < len(y) - length_dtw:
-        true_data = y_pad[i:i + length_dtw]
+        true_data = y_pad[i : i + length_dtw]
         true_data = true_data.flatten()
 
-        pred_data = y_hat_pad[i:i + length_dtw]
+        pred_data = y_hat_pad[i : i + length_dtw]
         pred_data = pred_data.flatten()
         dist = dtw(true_data, pred_data)
         similarity_dtw.append(dist)
         i += 1
 
-    errors = ([0] * half_length_dtw + similarity_dtw +
-              [0] * (len(y) - len(similarity_dtw) - half_length_dtw))
+    errors = (
+        [0] * half_length_dtw
+        + similarity_dtw
+        + [0] * (len(y) - len(similarity_dtw) - half_length_dtw)
+    )
 
     return errors
 
 
-def reconstruction_errors(y, y_hat, step_size=1, score_window=10, smoothing_window=0.01,
-                          smooth=True, rec_error_type='point'):
+def reconstruction_errors(
+    y,
+    y_hat,
+    step_size=1,
+    score_window=10,
+    smoothing_window=0.01,
+    smooth=True,
+    rec_error_type="point",
+):
     """Compute an array of reconstruction errors.
 
     Compute the discrepancies between the expected and the
@@ -799,13 +922,17 @@ def reconstruction_errors(y, y_hat, step_size=1, score_window=10, smoothing_wind
         if intermediate:
             predictions.append(np.median(np.asarray(intermediate)))
 
-            predictions_vs.append([[
-                np.min(np.asarray(intermediate)),
-                np.percentile(np.asarray(intermediate), 25),
-                np.percentile(np.asarray(intermediate), 50),
-                np.percentile(np.asarray(intermediate), 75),
-                np.max(np.asarray(intermediate))
-            ]])
+            predictions_vs.append(
+                [
+                    [
+                        np.min(np.asarray(intermediate)),
+                        np.percentile(np.asarray(intermediate), 25),
+                        np.percentile(np.asarray(intermediate), 50),
+                        np.percentile(np.asarray(intermediate), 75),
+                        np.max(np.asarray(intermediate)),
+                    ]
+                ]
+            )
 
     true = np.asarray(true)
     predictions = np.asarray(predictions)
@@ -822,12 +949,17 @@ def reconstruction_errors(y, y_hat, step_size=1, score_window=10, smoothing_wind
     elif rec_error_type.lower() == "dtw":
         errors = _dtw_error(true, predictions, score_window)
 
-
     # Apply smoothing
     if smooth:
-        errors = pd.Series(errors).rolling( # type: ignore
-            smoothing_window, center=True, min_periods=smoothing_window // 2).mean().values
-    return errors, predictions_vs # type: ignore
+        errors = (
+            pd.Series(errors)
+            .rolling(  # type: ignore
+                smoothing_window, center=True, min_periods=smoothing_window // 2
+            )
+            .mean()
+            .values
+        )
+    return errors, predictions_vs  # type: ignore
 
 
 def deltas(errors, epsilon, mean, std):
@@ -923,7 +1055,7 @@ def z_cost(z, errors, mean, std):
     above, consecutive = count_above(errors, epsilon)
 
     numerator = -(delta_mean / mean + delta_std / std)
-    denominator = above + consecutive ** 2
+    denominator = above + consecutive**2
 
     if denominator == 0:
         return np.inf
@@ -1009,10 +1141,12 @@ def _find_sequences(errors, epsilon, anomaly_padding):
             * Maximum error value that was not considered an anomaly.
     """
     above = pd.Series(errors > epsilon)
-    index_above = np.argwhere(above.values) # type: ignore
+    index_above = np.argwhere(above.values)  # type: ignore
 
     for idx in index_above.flatten():
-        above[max(0, idx - anomaly_padding):min(idx + anomaly_padding + 1, len(above))] = True
+        above[
+            max(0, idx - anomaly_padding) : min(idx + anomaly_padding + 1, len(above))
+        ] = True
 
     shift = above.shift(1).fillna(False)
     change = above != shift
@@ -1053,22 +1187,16 @@ def _get_max_errors(errors, sequences, max_below):
         pandas.DataFrame:
             DataFrame object containing columns ``start``, ``stop`` and ``max_error``.
     """
-    max_errors = [{
-        'max_error': max_below,
-        'start': -1,
-        'stop': -1
-    }]
+    max_errors = [{"max_error": max_below, "start": -1, "stop": -1}]
 
     for sequence in sequences:
         start, stop = sequence
-        sequence_errors = errors[start: stop + 1]
-        max_errors.append({
-            'start': start,
-            'stop': stop,
-            'max_error': max(sequence_errors)
-        })
+        sequence_errors = errors[start : stop + 1]
+        max_errors.append(
+            {"start": start, "stop": stop, "max_error": max(sequence_errors)}
+        )
 
-    max_errors = pd.DataFrame(max_errors).sort_values('max_error', ascending=False)
+    max_errors = pd.DataFrame(max_errors).sort_values("max_error", ascending=False)
     return max_errors.reset_index(drop=True)
 
 
@@ -1095,8 +1223,8 @@ def _prune_anomalies(max_errors, min_percent):
         ndarray:
             Array containing start, end, max_error of the pruned anomalies.
     """
-    next_error = max_errors['max_error'].shift(-1).iloc[:-1]
-    max_error = max_errors['max_error'].iloc[:-1]
+    next_error = max_errors["max_error"].shift(-1).iloc[:-1]
+    max_error = max_errors["max_error"].iloc[:-1]
 
     increase = (max_error - next_error) / max_error
     too_small = increase < min_percent
@@ -1106,7 +1234,7 @@ def _prune_anomalies(max_errors, min_percent):
     else:
         last_index = max_error[~too_small].index[-1]
 
-    return max_errors[['start', 'stop', 'max_error']].iloc[0: last_index + 1].values
+    return max_errors[["start", "stop", "max_error"]].iloc[0 : last_index + 1].values
 
 
 def _compute_scores(pruned_anomalies, errors, threshold, window_start):
@@ -1172,8 +1300,11 @@ def _merge_sequences(sequences):
             score.append(sequence[2])
             weights.append(sequence[1] - sequence[0])
             weighted_average = np.average(score, weights=weights)
-            new_sequences[-1] = (prev_sequence[0], max(prev_sequence[1], sequence[1]),
-                                 weighted_average)
+            new_sequences[-1] = (
+                prev_sequence[0],
+                max(prev_sequence[1], sequence[1]),
+                weighted_average,
+            )
         else:
             score = [sequence[2]]
             weights = [sequence[1] - sequence[0]]
@@ -1182,8 +1313,9 @@ def _merge_sequences(sequences):
     return np.array(new_sequences)
 
 
-def _find_window_sequences(window, z_range, anomaly_padding, min_percent, window_start,
-                           fixed_threshold):
+def _find_window_sequences(
+    window, z_range, anomaly_padding, min_percent, window_start, fixed_threshold
+):
     """Find sequences of values that are anomalous.
 
     We first find the threshold for the window, then find all sequences above that threshold.
@@ -1221,14 +1353,26 @@ def _find_window_sequences(window, z_range, anomaly_padding, min_percent, window
     window_sequences, max_below = _find_sequences(window, threshold, anomaly_padding)
     max_errors = _get_max_errors(window, window_sequences, max_below)
     pruned_anomalies = _prune_anomalies(max_errors, min_percent)
-    window_sequences = _compute_scores(pruned_anomalies, window, threshold, window_start)
+    window_sequences = _compute_scores(
+        pruned_anomalies, window, threshold, window_start
+    )
 
     return window_sequences
 
 
-def find_anomalies(errors, index, z_range=(0, 10), window_size=None, window_size_portion=None,
-                   window_step_size=None, window_step_size_portion=None, min_percent=0.1,
-                   anomaly_padding=50, lower_threshold=False, fixed_threshold=None):
+def find_anomalies(
+    errors,
+    index,
+    z_range=(0, 10),
+    window_size=None,
+    window_size_portion=None,
+    window_step_size=None,
+    window_step_size_portion=None,
+    min_percent=0.1,
+    anomaly_padding=50,
+    lower_threshold=False,
+    fixed_threshold=None,
+):
     """Find sequences of error values that are anomalous.
 
     We first define the window of errors, that we want to analyze. We then find the anomalous
@@ -1278,30 +1422,36 @@ def find_anomalies(errors, index, z_range=(0, 10), window_size=None, window_size
     """
     window_size = window_size or len(errors)
     if window_size_portion:
-        window_size = np.ceil(len(errors) * window_size_portion).astype('int')
+        window_size = np.ceil(len(errors) * window_size_portion).astype("int")
 
     window_step_size = window_step_size or window_size
     if window_step_size_portion:
-        window_step_size = np.ceil(window_size * window_step_size_portion).astype('int')
+        window_step_size = np.ceil(window_size * window_step_size_portion).astype("int")
 
     window_start = 0
     window_end = 0
     sequences = list()
-    
+
     while window_end < len(errors):
         window_end = window_start + window_size
         window = errors[window_start:window_end]
-        window_sequences = _find_window_sequences(window, z_range, anomaly_padding, min_percent,
-                                                  window_start, fixed_threshold)
+        window_sequences = _find_window_sequences(
+            window, z_range, anomaly_padding, min_percent, window_start, fixed_threshold
+        )
         sequences.extend(window_sequences)
 
         if lower_threshold:
             # Flip errors sequence around mean
             mean = window.mean()
             inverted_window = mean - (window - mean)
-            inverted_window_sequences = _find_window_sequences(inverted_window, z_range,
-                                                               anomaly_padding, min_percent,
-                                                               window_start, fixed_threshold)
+            inverted_window_sequences = _find_window_sequences(
+                inverted_window,
+                z_range,
+                anomaly_padding,
+                min_percent,
+                window_start,
+                fixed_threshold,
+            )
             sequences.extend(inverted_window_sequences)
 
         window_start = window_start + window_step_size
@@ -1335,14 +1485,14 @@ def find_scores(y_true, y_predict):
         elif y_true[i] == 0 and y_predict[i] == 1:
             fp += 1
 
-    print ('Accuracy {:.2f}'.format((tp + tn)/(len(y_true))))
+    print("Accuracy {:.2f}".format((tp + tn) / (len(y_true))))
     try:
-      precision = tp / (tp + fp)
-      recall = tp / (tp + fn)
-      print ('Precision {:.2f}'.format(precision))
-      print ('Recall {:.2f}'.format(recall))
-      print ('F1 Score {:.2f}'.format(2 * precision * recall / (precision + recall)))
+        precision = tp / (tp + fp)
+        recall = tp / (tp + fn)
+        print("Precision {:.2f}".format(precision))
+        print("Recall {:.2f}".format(recall))
+        print("F1 Score {:.2f}".format(2 * precision * recall / (precision + recall)))
     except:
-      print ('Precision {:.2f}'.format(0))
-      print ('Recall {:.2f}'.format(0))
-      print ('F1 Score {:.2f}'.format(0))
+        print("Precision {:.2f}".format(0))
+        print("Recall {:.2f}".format(0))
+        print("F1 Score {:.2f}".format(0))

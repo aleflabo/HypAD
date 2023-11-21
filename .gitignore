@@ -1,5 +1,8 @@
-/data
 *pyc
 /trained_models
 /.vscode
 structure.txt
+*/CASAS
+*/split
+*.ipynb_checkpoints
+*__pycache__

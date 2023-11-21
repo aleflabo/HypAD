@@ -6,49 +6,58 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-plt.switch_backend('agg')
+plt.switch_backend("agg")
 from collections import deque
+
 from torchvision import transforms
 
 
-def save_checkpoint(state, is_best=0, gap=1, filename='models/checkpoint.pth.tar', keep_all=False):
+def save_checkpoint(
+    state, is_best=0, gap=1, filename="models/checkpoint.pth.tar", keep_all=False
+):
     torch.save(state, filename)
-    last_epoch_path = os.path.join(os.path.dirname(filename),
-                                   'epoch%s.pth.tar' % str(state['epoch'] - gap))
+    last_epoch_path = os.path.join(
+        os.path.dirname(filename), "epoch%s.pth.tar" % str(state["epoch"] - gap)
+    )
     if not keep_all:
         try:
             os.remove(last_epoch_path)
         except:
             pass
     if is_best:
-        past_best = glob.glob(os.path.join(os.path.dirname(filename), 'model_best_*.pth.tar'))
+        past_best = glob.glob(
+            os.path.join(os.path.dirname(filename), "model_best_*.pth.tar")
+        )
         for i in past_best:
             try:
                 os.remove(i)
             except:
                 pass
-        path_best = os.path.join(os.path.dirname(filename), 'model_best_epoch%s.pth.tar' % str(state['epoch']))
+        path_best = os.path.join(
+            os.path.dirname(filename),
+            "model_best_epoch%s.pth.tar" % str(state["epoch"]),
+        )
         torch.save(state, path_best)
-        print(f'Updating best model: {path_best}')
+        print(f"Updating best model: {path_best}")
 
 
 def write_log(content, epoch, filename):
     if not os.path.exists(filename):
-        log_file = open(filename, 'w')
+        log_file = open(filename, "w")
     else:
-        log_file = open(filename, 'a')
-    log_file.write('## Epoch %d:\n' % epoch)
-    log_file.write('time: %s\n' % str(datetime.now()))
-    log_file.write(content + '\n\n')
+        log_file = open(filename, "a")
+    log_file.write("## Epoch %d:\n" % epoch)
+    log_file.write("time: %s\n" % str(datetime.now()))
+    log_file.write(content + "\n\n")
     log_file.close()
 
 
 def calc_topk_accuracy(output, target, topk=(1,)):
-    '''
+    """
     Modified from: https://gist.github.com/agermanidis/275b23ad7a10ee89adccf021536bb97e
-    Given predicted and ground truth labels, 
+    Given predicted and ground truth labels,
     calculate top-k accuracies.
-    '''
+    """
     maxk = max(topk)
     batch_size = target.size(0)
 
@@ -64,14 +73,14 @@ def calc_topk_accuracy(output, target, topk=(1,)):
 
 
 def calc_accuracy(output, target):
-    '''output: (B, N); target: (B)'''
+    """output: (B, N); target: (B)"""
     target = target.squeeze()
     _, pred = torch.max(output, 1)
     return torch.mean((pred == target).float())
 
 
 def calc_accuracy_binary(output, target):
-    '''output, target: (B, N), output is logits, before sigmoid '''
+    """output, target: (B, N), output is logits, before sigmoid"""
     pred = output > 0
     acc = torch.mean((pred == target.byte()).float())
     del pred, output, target
@@ -118,7 +127,7 @@ class AverageMeter(object):
         elif type(val) == float:
             pass
         else:
-            raise TypeError(f'{type(val)} type not supported in AverageMeter')
+            raise TypeError(f"{type(val)} type not supported in AverageMeter")
 
         if type(n) == torch.Tensor:
             n = n.float().mean().item()
@@ -150,32 +159,36 @@ class AverageMeter(object):
         return self.count
 
 
-def neq_load_customized(args, model, pretrained_dict,
-                        parts=['backbone', 'agg', 'network_pred', 'hyperbolic_linear', 'network-class'],
-                        size_diff=False):
-    '''
+def neq_load_customized(
+    args,
+    model,
+    pretrained_dict,
+    parts=["backbone", "agg", "network_pred", "hyperbolic_linear", "network-class"],
+    size_diff=False,
+):
+    """
     load pre-trained model in a not-equal way, when new model has been partially modified
     size_diff: some parameters may have the same name but different size. Cannot load these, but do not throw error, and
     load all the rest
-    '''
+    """
     model_dict = model.state_dict()
     tmp = {}
-    print_r(args, '\n=======Check Weights Loading======')
-    print_r(args, ('loading the following parts:', ', '.join(parts)))
-    if parts == 'all':
+    print_r(args, "\n=======Check Weights Loading======")
+    print_r(args, ("loading the following parts:", ", ".join(parts)))
+    if parts == "all":
         if size_diff:
             for k, v in pretrained_dict.items():
                 if k in model.state_dict() and model.state_dict()[k].shape == v.shape:
                     tmp[k] = v
                 else:
-                    print_r(args, f'{k} not loaded')
+                    print_r(args, f"{k} not loaded")
         else:
             tmp = pretrained_dict
     else:
         for part in parts:
-            print_r(args, ('loading:', part))
-            print_r(args, '\n=======Check Weights Loading======')
-            print_r(args, 'Weights not used from pretrained file:')
+            print_r(args, ("loading:", part))
+            print_r(args, "\n=======Check Weights Loading======")
+            print_r(args, "Weights not used from pretrained file:")
             for k, v in pretrained_dict.items():
                 if part in k:
                     if k in model_dict:
@@ -183,25 +196,29 @@ def neq_load_customized(args, model, pretrained_dict,
                             tmp[k] = v
                     else:
                         print_r(args, k)
-            print_r(args, '---------------------------')
-            print_r(args, 'Weights not loaded into new model:')
+            print_r(args, "---------------------------")
+            print_r(args, "Weights not loaded into new model:")
             for k, v in model_dict.items():
                 if part in k:
                     if k not in pretrained_dict:
                         print_r(args, k)
-            print_r(args, '===================================\n')
+            print_r(args, "===================================\n")
 
     del pretrained_dict
-    if 'time_index.weight' in tmp and \
-            'time_index' in [a[0].split('.')[0] for a in list(model.named_parameters())] and \
-            model.time_index.weight.shape[0] < tmp['time_index.weight'].shape[0]:
-        tmp['time_index.weight'].data = tmp['time_index.weight'][:model.time_index.weight.shape[0]].data
+    if (
+        "time_index.weight" in tmp
+        and "time_index" in [a[0].split(".")[0] for a in list(model.named_parameters())]
+        and model.time_index.weight.shape[0] < tmp["time_index.weight"].shape[0]
+    ):
+        tmp["time_index.weight"].data = tmp["time_index.weight"][
+            : model.time_index.weight.shape[0]
+        ].data
     model.load_state_dict(tmp, strict=False)
     return model
 
 
 def print_r(args, text, print_no_verbose=False):
-    """ Print only when the local rank is <=0 (only once)"""
+    """Print only when the local rank is <=0 (only once)"""
     if args.local_rank <= 0 and (args.verbose or print_no_verbose):
         if type(text) == tuple:
             print(*text)

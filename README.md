@@ -44,7 +44,7 @@ Visit our [**webpage**](https://www.pinlab.org/hypad) for more details.
 ## Setup
 ### Environment
 ```
-conda env create -f environment.yaml
+conda env create -f environment.yml
 conda activate hypad
 ```
 

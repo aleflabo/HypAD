@@ -3,12 +3,12 @@ import torch
 
 
 def poincare_distance(pred, gt):
-    '''
+    """
     Calculate pair-wise poincare distance between each row in two input tensors
-    
+
     See equation (1) in this paper for mathematical expression:
     https://arxiv.org/abs/1705.08039
-    '''
+    """
     (N_pred, D) = pred.shape
     (N_gt, D) = gt.shape
     a = (1 - square_norm(pred)).view(N_pred, 1)
@@ -26,17 +26,17 @@ def square_norm(x):
 
 
 def pairwise_distances(x, y=None):
-    '''
+    """
     Input: x is a Nxd matrix
            y is an optional Mxd matirx
     Output: dist is a NxM matrix where dist[i,j] is the square norm between x[i,:] and y[j,:]
             if y is not given then use 'y=x'.
     i.e. dist[i,j] = ||x[i,:]-y[j,:]||^2
-    '''
-    x_norm = (x ** 2).sum(1).view(-1, 1)
+    """
+    x_norm = (x**2).sum(1).view(-1, 1)
     if y is not None:
         y_t = torch.transpose(y, 0, 1)
-        y_norm = (y ** 2).sum(1).view(1, -1)
+        y_norm = (y**2).sum(1).view(1, -1)
     else:
         y_t = torch.transpose(x, 0, 1)
         y_norm = x_norm.view(1, -1)

@@ -11,13 +11,13 @@ from torch.cuda.amp import autocast
 
 
 def mobius_linear(
-        input,
-        weight,
-        bias=None,
-        hyperbolic_input=True,
-        hyperbolic_bias=True,
-        nonlin=None,
-        k=-1.0,
+    input,
+    weight,
+    bias=None,
+    hyperbolic_input=True,
+    hyperbolic_bias=True,
+    nonlin=None,
+    k=-1.0,
 ):
     k = torch.tensor(k)
     if hyperbolic_input:
@@ -66,13 +66,13 @@ def one_rnn_transform(W, h, U, x, b, k):
 
 
 def mobius_gru_cell(
-        input: torch.Tensor,
-        hx: torch.Tensor,
-        weight_ih: torch.Tensor,
-        weight_hh: torch.Tensor,
-        bias: torch.Tensor,
-        k: torch.Tensor,
-        nonlin=None,
+    input: torch.Tensor,
+    hx: torch.Tensor,
+    weight_ih: torch.Tensor,
+    weight_hh: torch.Tensor,
+    bias: torch.Tensor,
+    k: torch.Tensor,
+    nonlin=None,
 ):
     W_ir, W_ih, W_iz = weight_ih.chunk(3)
     b_r, b_h, b_z = bias
@@ -92,16 +92,16 @@ def mobius_gru_cell(
 
 
 def mobius_gru_loop(
-        input: torch.Tensor,
-        h0: torch.Tensor,
-        weight_ih: torch.Tensor,
-        weight_hh: torch.Tensor,
-        bias: torch.Tensor,
-        k: torch.Tensor,
-        batch_sizes=None,
-        hyperbolic_input: bool = False,
-        hyperbolic_hidden_state0: bool = False,
-        nonlin=None,
+    input: torch.Tensor,
+    h0: torch.Tensor,
+    weight_ih: torch.Tensor,
+    weight_hh: torch.Tensor,
+    bias: torch.Tensor,
+    k: torch.Tensor,
+    batch_sizes=None,
+    hyperbolic_input: bool = False,
+    hyperbolic_hidden_state0: bool = False,
+    nonlin=None,
 ):
     if not hyperbolic_hidden_state0:
         hx = gmath.expmap0(h0, k=k)
@@ -129,7 +129,7 @@ def mobius_gru_loop(
         h_last = []
         T = len(batch_sizes) - 1
         for i, t in enumerate(range(batch_sizes.size(0))):
-            ix, input = input[: batch_sizes[t]], input[batch_sizes[t]:]
+            ix, input = input[: batch_sizes[t]], input[batch_sizes[t] :]
             hx = mobius_gru_cell(
                 input=ix,
                 hx=hx,
@@ -141,7 +141,7 @@ def mobius_gru_loop(
             )
             outs.append(hx)
             if t < T:
-                hx, ht = hx[: batch_sizes[t + 1]], hx[batch_sizes[t + 1]:]
+                hx, ht = hx[: batch_sizes[t + 1]], hx[batch_sizes[t + 1] :]
                 h_last.append(ht)
             else:
                 h_last.append(hx)
@@ -153,14 +153,14 @@ def mobius_gru_loop(
 
 class MobiusLinear(torch.nn.Linear):
     def __init__(
-            self,
-            *args,
-            hyperbolic_input=True,
-            hyperbolic_bias=True,
-            nonlin=None,
-            k=-1.0,
-            fp64_hyper=True,
-            **kwargs
+        self,
+        *args,
+        hyperbolic_input=True,
+        hyperbolic_bias=True,
+        nonlin=None,
+        k=-1.0,
+        fp64_hyper=True,
+        **kwargs
     ):
         k = torch.tensor(k)
         super().__init__(*args, **kwargs)

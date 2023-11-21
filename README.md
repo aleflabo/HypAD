@@ -51,7 +51,7 @@ conda activate hypad
 ### Datasets
 :warning: **UPDATE 21/11/2023** :warning:
 
-The univariate datasets have been uploaded to this repo.
+The univariate datasets have been added to this repo.
 
 :warning: **UPDATE 04/05/2023** :warning:
 

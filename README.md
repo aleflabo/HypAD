@@ -19,8 +19,10 @@ Visit our [**webpage**](https://www.pinlab.org/hypad) for more details.
 ├── anomaly_detection.py
 ├── configs
 │   └── univariate.yaml
+│   └── multivariate.yaml
 ├── data
 │   └── dataset.pickle
+│   └── all univariate datasets
 ├── environment.yml
 ├── hyperspace
 │   ├── hyrnn_nets.py

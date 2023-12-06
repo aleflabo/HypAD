@@ -108,7 +108,17 @@ list of signals: [fall, weakness, nocturia. moretimeinchair, slowerwalking]
 
 Ask flaborea@di.uniroma1.it for the multivariate dataset.
 
-
+## Citation
+```
+@InProceedings{Flaborea_2023_CVPR,
+    author    = {Flaborea, Alessandro and Prenkaj, Bardh and Munjal, Bharti and Sterpa, Marco Aurelio and Aragona, Dario and Podo, Luca and Galasso, Fabio},
+    title     = {Are We Certain It's Anomalous?},
+    booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) Workshops},
+    month     = {June},
+    year      = {2023},
+    pages     = {2897-2907}
+}
+```
 
 
 ## Acknowledgements
